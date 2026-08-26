@@ -94,10 +94,28 @@
     document.body.appendChild(barre);
   }
 
+  // MODE ADMIN PUR (26/08/2026, choix de l'exploitant) : dans l'application,
+  // le site public n'existe pas. La racine — la page d'accueil avec l'avion —
+  // renvoie vers l'espace admin AVANT tout affichage, et si une navigation
+  // atterrit quand meme sur une page publique (wiki, carte), son bandeau
+  // (topbar : logo, Rejoindre, Boutique...) est masque : on y est pour lire un
+  // contenu, pas pour retrouver l'habillage grand public.
+  var CHEMINS_ADMIN = /^\/(admin|fivem|ticket|forms|achat-boutique|graph|groupe-graph)/;
+  if (SUR_WORLDFA && (location.pathname === '/' || location.pathname === '/index.html')) {
+    location.replace('/admin');
+    return;
+  }
+
   function poser() {
     if (!document.body) return;
     poserBarreTitre();
     if (!SUR_WORLDFA) return;
+
+    if (!CHEMINS_ADMIN.test(location.pathname)) {
+      var voile = document.createElement('style');
+      voile.textContent = '.topbar { display: none !important; }';
+      document.head.appendChild(voile);
+    }
 
     var style = document.createElement('style');
     style.textContent = [

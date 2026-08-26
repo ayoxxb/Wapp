@@ -48,4 +48,10 @@ assert.ok(src.includes('toggleMaximize') && src.includes('minimize') && src.incl
 assert.ok(src.includes('poserBarreTitre();') && src.includes('if (!SUR_WORLDFA) return;'), 'titre partout, sidebar seulement worldfa');
 ok('barre de titre');
 
+// Mode admin pur : la racine publique renvoie vers /admin avant tout
+// affichage, et le bandeau public disparait sur les pages hors admin.
+assert.ok(src.includes("location.replace('/admin')"), 'racine redirigee');
+assert.ok(src.includes('.topbar { display: none !important; }'), 'bandeau public masque');
+ok('mode admin pur');
+
 console.log('\nBarre laterale : tous les invariants tiennent.');
