@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "acces-worldfa",
+  "description": "La barre laterale injectee dans worldfa.fr peut appeler les trois commandes de l app (version, verification et pose de la mise a jour) et ouvrir un lien externe dans le navigateur. Rien d autre : ni fichiers, ni shell, ni fenetres.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["https://worldfa.fr", "https://worldfa.fr/*"]
+  },
+  "permissions": ["core:default", "opener:default"]
+}
