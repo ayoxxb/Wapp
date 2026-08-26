@@ -39,4 +39,13 @@ ok('anti double injection');
 assert.ok(src.includes("Promise.reject"));
 ok('degradation sans IPC');
 
+// La barre de titre remplace celle de Windows : sans elle, la fenetre est
+// indeplacable et sans bouton fermer — y compris pendant l'OAuth Discord,
+// d'ou sa pose sur TOUTES les origines quand la barre laterale, elle, reste
+// cantonnee a worldfa.fr.
+assert.ok(src.includes('data-tauri-drag-region'), 'bande saisissable');
+assert.ok(src.includes('toggleMaximize') && src.includes('minimize') && src.includes('w.close()'), 'les trois boutons');
+assert.ok(src.includes('poserBarreTitre();') && src.includes('if (!SUR_WORLDFA) return;'), 'titre partout, sidebar seulement worldfa');
+ok('barre de titre');
+
 console.log('\nBarre laterale : tous les invariants tiennent.');

@@ -80,6 +80,12 @@ fn main() {
                 .title("Espace Admin — World:FA")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(1000.0, 640.0)
+                // Pas de barre de titre Windows : elle prend la couleur
+                // d'accentuation du systeme (bleu chez l'exploitant) et jure
+                // avec l'ecran. La barre est dessinee par injection.js —
+                // sombre, avec ses propres boutons reduire/agrandir/fermer.
+                // La fenetre reste redimensionnable par ses bords.
+                .decorations(false)
                 // La barre laterale est INJECTEE dans chaque page du webview
                 // plutot que rendue dans une seconde vue : une seule origine
                 // (worldfa.fr), donc le cookie de session se comporte

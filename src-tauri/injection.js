@@ -10,7 +10,7 @@
 (function () {
   'use strict';
 
-  if (!/(^|\.)worldfa\.fr$/.test(location.hostname) && !window.__WFA_APP_TEST) return;
+  var SUR_WORLDFA = /(^|\.)worldfa\.fr$/.test(location.hostname) || Boolean(window.__WFA_APP_TEST);
   if (window.__WFA_APP_POSEE) return;
   window.__WFA_APP_POSEE = true;
 
@@ -33,14 +33,77 @@
     return Promise.reject(new Error('ipc indisponible'));
   }
 
+  var HAUTEUR_TITRE = 34;
+
+  // La fenetre n'a plus de barre systeme (couleur d'accentuation Windows,
+  // bleue chez l'exploitant) : celle-ci la remplace sur TOUTES les pages —
+  // sans elle, la page de connexion Discord serait indeplacable et sans
+  // bouton fermer. data-tauri-drag-region rend la bande saisissable a la
+  // souris et le double-clic agrandit, comme une vraie barre de titre.
+  function poserBarreTitre() {
+    var style = document.createElement('style');
+    style.textContent = [
+      '#wfa-titlebar { position: fixed; top: 0; left: 0; right: 0; height: ' + HAUTEUR_TITRE + 'px;',
+      '  z-index: 2147483000; display: flex; align-items: stretch; box-sizing: border-box;',
+      '  background: #0c0c0d; border-bottom: 1px solid rgba(255,255,255,0.08);',
+      '  font-family: "Segoe UI", Arial, sans-serif; user-select: none; -webkit-user-select: none; }',
+      '#wfa-titlebar .wfa-tb-titre { flex: 1; display: flex; align-items: center; padding: 0 14px;',
+      '  font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;',
+      '  color: rgba(255,255,255,0.45); }',
+      '#wfa-titlebar .wfa-tb-titre span { color: rgba(220,100,100,0.95); }',
+      '#wfa-titlebar button { width: 46px; border: 0; background: transparent; cursor: pointer;',
+      '  color: rgba(255,255,255,0.5); font-size: 13px; font-family: "Segoe UI Symbol", "Segoe UI", sans-serif; }',
+      '#wfa-titlebar button:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.9); }',
+      '#wfa-titlebar button.wfa-fermer:hover { background: rgba(200,60,60,0.85); color: #fff; }',
+      'body { margin-top: ' + HAUTEUR_TITRE + 'px !important; }'
+    ].join('\n');
+    document.head.appendChild(style);
+
+    var barre = document.createElement('div');
+    barre.id = 'wfa-titlebar';
+
+    var titre = document.createElement('div');
+    titre.className = 'wfa-tb-titre';
+    titre.setAttribute('data-tauri-drag-region', '');
+    titre.innerHTML = 'Espace Admin — World<span>:FA</span>';
+    barre.appendChild(titre);
+
+    function fenetre() {
+      try {
+        if (window.__TAURI__ && window.__TAURI__.window) {
+          return window.__TAURI__.window.getCurrentWindow();
+        }
+      } catch (e) {}
+      return null;
+    }
+    function boutonFenetre(texte, classe, action) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = texte;
+      if (classe) b.className = classe;
+      b.addEventListener('click', function () {
+        var w = fenetre();
+        if (!w) return;
+        try { action(w); } catch (e) {}
+      });
+      return b;
+    }
+    barre.appendChild(boutonFenetre('\u2500', '', function (w) { w.minimize(); }));
+    barre.appendChild(boutonFenetre('\u25A1', '', function (w) { w.toggleMaximize(); }));
+    barre.appendChild(boutonFenetre('\u2715', 'wfa-fermer', function (w) { w.close(); }));
+    document.body.appendChild(barre);
+  }
+
   function poser() {
     if (!document.body) return;
+    poserBarreTitre();
+    if (!SUR_WORLDFA) return;
 
     var style = document.createElement('style');
     style.textContent = [
       /* Meme langage que l espace admin : gris tres sombres, filets faibles,
          accent rouge, AUCUN arrondi. */
-      '#wfa-app-bar { position: fixed; top: 0; left: 0; bottom: 0; width: ' + LARGEUR + 'px;',
+      '#wfa-app-bar { position: fixed; top: ' + HAUTEUR_TITRE + 'px; left: 0; bottom: 0; width: ' + LARGEUR + 'px;',
       '  z-index: 6; display: flex; flex-direction: column; box-sizing: border-box;',
       '  background: linear-gradient(180deg, #0c0c0d 0%, #131315 100%);',
       '  border-right: 1px solid rgba(255,255,255,0.08);',
@@ -67,7 +130,7 @@
       '#wfa-app-bar .wfa-replier { float: right; cursor: pointer; color: rgba(255,255,255,0.3);',
       '  font-size: 12px; padding: 2px 4px; }',
       '#wfa-app-bar .wfa-replier:hover { color: rgba(255,255,255,0.7); }',
-      '#wfa-app-poignee { position: fixed; top: 10px; left: 10px; z-index: 6; display: none;',
+      '#wfa-app-poignee { position: fixed; top: ' + (HAUTEUR_TITRE + 8) + 'px; left: 10px; z-index: 6; display: none;',
       '  width: 34px; height: 34px; line-height: 32px; text-align: center; cursor: pointer;',
       '  background: rgba(19,19,21,0.95); border: 1px solid rgba(255,255,255,0.14);',
       '  color: rgba(255,255,255,0.6); font-size: 16px; }',
