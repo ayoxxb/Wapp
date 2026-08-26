@@ -1,6 +1,6 @@
 [package]
 name = "worldfa-admin"
-version = "0.1.0"
+version = "0.1.1"
 description = "Espace admin World:FA - application de bureau"
 edition = "2021"
 
