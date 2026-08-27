@@ -54,4 +54,12 @@ assert.ok(src.includes("location.replace('/admin')"), 'racine redirigee');
 assert.ok(src.includes('.topbar { display: none !important; }'), 'bandeau public masque');
 ok('mode admin pur');
 
+// Chaque categorie a son ajustement : bouton retour masque et depart aligne.
+assert.ok(src.includes('AJUSTEMENTS'), 'table des ajustements');
+for (const chemin of ['/fivem/anticheat', '/admin/sessions', '/admin/panel-fivem', '/admin/giveaway', '/achat-boutique']) {
+  assert.ok(src.includes("'" + chemin + "':"), 'ajustement ' + chemin);
+}
+assert.ok(src.includes('.retour { display: none !important; }'), 'bouton retour masque');
+ok('ajustements par categorie');
+
 console.log('\nBarre laterale : tous les invariants tiennent.');

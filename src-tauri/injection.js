@@ -117,6 +117,41 @@
       document.head.appendChild(voile);
     }
 
+    // AJUSTEMENTS PAR CATEGORIE (26/08/2026). Deux choses que chaque page
+    // traine du site et qui n'ont pas de sens dans l'application :
+    //   - le bouton « Espace admin / Retour » en tete : la barre laterale EST
+    //     la navigation, et ce bouton decalait tout le contenu vers le bas,
+    //     a une hauteur differente selon la page ;
+    //   - le rembourrage haut de 48 px, prevu pour une page nue dans un
+    //     navigateur — sous notre barre de titre, il creusait une bande vide.
+    // Chaque categorie demarre desormais a la meme hauteur.
+    var AJUSTEMENTS = {
+      '/fivem/anticheat':
+        '.topbar { display: none !important; }' +
+        'body { padding-top: 22px !important; }',
+      '/admin/sessions':
+        '.retour { display: none !important; }' +
+        'body { padding-top: 22px !important; }',
+      '/admin/panel-fivem':
+        '.retour { display: none !important; }' +
+        'body { padding-top: 22px !important; }',
+      '/admin/giveaway':
+        '.retour { display: none !important; }' +
+        'body { padding-top: 22px !important; }',
+      '/achat-boutique':
+        '#retour { display: none !important; }' +
+        'footer { display: none !important; }' +
+        'body { padding-top: 22px !important; }'
+    };
+    for (var chemin in AJUSTEMENTS) {
+      if (location.pathname === chemin || location.pathname.indexOf(chemin + '/') === 0) {
+        var ajustement = document.createElement('style');
+        ajustement.textContent = AJUSTEMENTS[chemin];
+        document.head.appendChild(ajustement);
+        break;
+      }
+    }
+
     var style = document.createElement('style');
     style.textContent = [
       /* Meme langage que l espace admin : gris tres sombres, filets faibles,
