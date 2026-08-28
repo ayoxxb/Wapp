@@ -14,13 +14,58 @@
   if (window.__WFA_APP_POSEE) return;
   window.__WFA_APP_POSEE = true;
 
-  var CATEGORIES = [
-    { chemin: '/fivem/anticheat',    nom: 'Anticheat' },
-    { chemin: '/admin/sessions',     nom: 'Permission & Session' },
-    { chemin: '/admin/panel-fivem',  nom: 'Panel FiveM' },
-    { chemin: '/admin/giveaway',     nom: 'Giveaway' },
-    { chemin: '/achat-boutique',     nom: 'Achat boutique' }
+  // TOUS les outils du hub (28/08/2026, demande) — memes quatre categories et
+  // meme ordre que worldfa.fr/admin, pour qu'on retrouve un outil au meme
+  // endroit dans la barre et dans la page d'ouverture.
+  //
+  // Aucun filtrage par permission : l'application est DESTINEE aux fondateurs
+  // (rien ne l'impose techniquement — l'installeur est en telechargement
+  // libre), et la barre a toujours tout montre. Chaque page refait son propre
+  // controle cote serveur : la barre n'ouvre aucun acces, au pire un lien
+  // mene a un refus. Si elle est distribuee plus largement un jour, filtrer
+  // sur /api/me devient utile.
+  var GROUPES = [
+    { titre: 'Serveur de jeu', liens: [
+      { chemin: '/fivem',                       nom: 'Gestion FiveM' },
+      { chemin: '/fivem/stats',                 nom: 'Stats de tir' },
+      { chemin: '/admin/reports',               nom: 'Reports' },
+      { chemin: '/fivem/anticheat',             nom: 'Anticheat' },
+      { chemin: '/admin/panel-fivem',           nom: 'Panel FiveM' }
+    ] },
+    { titre: 'Joueurs & récompenses', liens: [
+      { chemin: '/ticket',                      nom: 'Gestion ticket' },
+      { chemin: '/admin/giveaway',              nom: 'Giveaway' },
+      { chemin: '/admin/boost',                 nom: 'Boost' },
+      { chemin: '/achat-boutique',              nom: 'Achat boutique' }
+    ] },
+    { titre: 'Équipe & candidatures', liens: [
+      { chemin: '/admin/planning',              nom: 'Présence staff' },
+      { chemin: '/ticket/stats-tickets',        nom: 'Stats tickets' },
+      { chemin: '/forms/gestion',               nom: 'Candidatures' },
+      { chemin: '/forms/admin',                 nom: 'Édition formulaires' },
+      { chemin: '/forms/candidature-pole-ggo',  nom: 'Pôle GGO' }
+    ] },
+    { titre: 'Site & supervision', liens: [
+      { chemin: '/admin/sessions',              nom: 'Permissions' },
+      { chemin: '/admin/wiki',                  nom: 'Wiki' },
+      { chemin: '/graph',                       nom: 'Supervision VPS' },
+      { chemin: '/groupe-graph',                nom: 'Fréquentation' }
+    ] }
   ];
+
+  // Le chemin le PLUS LONG qui corresponde a la page courante, '' si aucun.
+  // Indispensable depuis qu'il y a des chemins emboites : /fivem/stats
+  // commence par /fivem, et une simple correspondance de prefixe allumait
+  // DEUX liens — ou le mauvais.
+  function cheminLePlusPrecis(chemins) {
+    var gagnant = '';
+    for (var i = 0; i < chemins.length; i += 1) {
+      var c = chemins[i];
+      var correspond = location.pathname === c || location.pathname.indexOf(c + '/') === 0;
+      if (correspond && c.length > gagnant.length) gagnant = c;
+    }
+    return gagnant;
+  }
   var LARGEUR = 210;
   var CLE_REPLI = 'wfa_app_sidebar_replie';
 
@@ -141,15 +186,44 @@
       '/achat-boutique':
         '#retour { display: none !important; }' +
         'footer { display: none !important; }' +
+        'body { padding-top: 22px !important; }',
+      '/admin/reports':
+        '.retour { display: none !important; }' +
+        'body { padding-top: 22px !important; }',
+      '/admin/boost':
+        '.retour { display: none !important; }' +
+        'body { padding-top: 22px !important; }',
+      // Ces deux-la nomment leur bouton retour « back » et non « retour » :
+      // c'est ce qui les avait fait oublier a la premiere ecriture. Leur
+      // rembourrage haut vaut 48 px (planning) et 40 px (wiki).
+      '/admin/planning':
+        '.back[href="/admin"] { display: none !important; }' +
+        'body { padding-top: 22px !important; }',
+      // ATTENTION au selecteur : admin-wiki porte DEUX liens .back — le
+      // retour vers /admin (a masquer) et « Voir la page publique » vers
+      // /wiki, qui doit rester. Un « .back » nu les effacait tous les deux.
+      '/admin/wiki':
+        '.back[href="/admin"] { display: none !important; }' +
         'body { padding-top: 22px !important; }'
     };
-    for (var chemin in AJUSTEMENTS) {
-      if (location.pathname === chemin || location.pathname.indexOf(chemin + '/') === 0) {
-        var ajustement = document.createElement('style');
-        ajustement.textContent = AJUSTEMENTS[chemin];
-        document.head.appendChild(ajustement);
-        break;
-      }
+    // AUCUN ajustement pour /ticket, /fivem, /fivem/stats, /graph,
+    // /groupe-graph ni /forms/* : ces pages ne viennent pas de worldfa (ou
+    // pas de son gabarit admin) et plusieurs se calent en `height: 100vh` —
+    // leur imposer un `padding-top` a l'aveugle decalerait leur mise en page
+    // au lieu de la nettoyer.
+    //
+    // La cle retenue est la PLUS LONGUE qui corresponde. Aucune cle de cette
+    // table n'est aujourd'hui prefixe d'une autre, donc l'ancienne boucle
+    // (premiere cle venue, ordre de l'objet) rendait le meme resultat : c'est
+    // une PRECAUTION, pas la correction d'un defaut observe. Elle evite qu'un
+    // ajout futur du genre /admin/panel-fivem/console ne depende de l'ordre
+    // d'ecriture — et elle partage sa regle avec le lien actif, qui, lui,
+    // avait un vrai probleme.
+    var cheminAjuste = cheminLePlusPrecis(Object.keys(AJUSTEMENTS));
+    if (cheminAjuste) {
+      var ajustement = document.createElement('style');
+      ajustement.textContent = AJUSTEMENTS[cheminAjuste];
+      document.head.appendChild(ajustement);
     }
 
     var style = document.createElement('style');
@@ -165,9 +239,15 @@
       '  font-size: 15px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;',
       '  color: rgba(255,255,255,0.85); border-bottom: 1px solid rgba(255,255,255,0.08); }',
       '#wfa-app-bar .wfa-titre span { color: rgba(220,100,100,0.95); }',
-      '#wfa-app-bar nav { flex: 1; padding: 10px 0; overflow-y: auto; }',
-      '#wfa-app-bar nav a { display: block; padding: 11px 16px; text-decoration: none;',
-      '  font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;',
+      '#wfa-app-bar nav { flex: 1; padding: 6px 0 10px; overflow-y: auto; }',
+      /* Intitule de groupe : meme micro-titre que les sections du hub. */
+      '#wfa-app-bar nav .wfa-groupe { padding: 12px 16px 4px; font-size: 8.5px; font-weight: 700;',
+      '  letter-spacing: 1.6px; text-transform: uppercase; color: rgba(255,255,255,0.22); }',
+      /* Rembourrage resserre depuis le passage a 18 liens (28/08/2026) :
+         a 11 px la liste ne tenait plus sans defilement sur une fenetre
+         courante. */
+      '#wfa-app-bar nav a { display: block; padding: 6px 16px; text-decoration: none;',
+      '  font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;',
       '  color: rgba(255,255,255,0.45); border-left: 2px solid transparent; }',
       '#wfa-app-bar nav a:hover { color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.04); }',
       '#wfa-app-bar nav a.actif { color: rgba(220,100,100,0.95);',
@@ -191,7 +271,12 @@
       'body { margin-left: ' + LARGEUR + 'px !important; }',
       'body.wfa-replie { margin-left: 0 !important; }',
       'body.wfa-replie #wfa-app-bar { display: none; }',
-      'body.wfa-replie #wfa-app-poignee { display: block; }'
+      'body.wfa-replie #wfa-app-poignee { display: block; }',
+      /* Pastille de mise a jour sur la poignee : la barre repliee cache le
+         bouton, et le repli est memorise. Sans ce point, rien ne signalait
+         plus jamais qu'une version attend. */
+      '#wfa-app-poignee.wfa-maj::after { content: ""; position: absolute; top: -1px; right: -1px;',
+      '  width: 7px; height: 7px; border-radius: 50%; background: rgba(52,211,153,0.95); }'
     ].join('\n');
     document.head.appendChild(style);
 
@@ -211,15 +296,24 @@
     barre.appendChild(titre);
 
     var nav = document.createElement('nav');
-    for (var i = 0; i < CATEGORIES.length; i += 1) {
-      var lien = document.createElement('a');
-      lien.href = CATEGORIES[i].chemin;
-      lien.textContent = CATEGORIES[i].nom;
-      if (location.pathname === CATEGORIES[i].chemin
-          || location.pathname.indexOf(CATEGORIES[i].chemin + '/') === 0) {
-        lien.className = 'actif';
+    var tousLesChemins = [];
+    for (var g = 0; g < GROUPES.length; g += 1) {
+      for (var j = 0; j < GROUPES[g].liens.length; j += 1) tousLesChemins.push(GROUPES[g].liens[j].chemin);
+    }
+    var cheminActif = cheminLePlusPrecis(tousLesChemins);
+
+    for (var g2 = 0; g2 < GROUPES.length; g2 += 1) {
+      var entete = document.createElement('div');
+      entete.className = 'wfa-groupe';
+      entete.textContent = GROUPES[g2].titre;
+      nav.appendChild(entete);
+      for (var k = 0; k < GROUPES[g2].liens.length; k += 1) {
+        var lien = document.createElement('a');
+        lien.href = GROUPES[g2].liens[k].chemin;
+        lien.textContent = GROUPES[g2].liens[k].nom;
+        if (GROUPES[g2].liens[k].chemin === cheminActif) lien.className = 'actif';
+        nav.appendChild(lien);
       }
-      nav.appendChild(lien);
     }
     barre.appendChild(nav);
 
@@ -267,6 +361,9 @@
         boutonMaj.style.display = 'block';
         boutonMaj.disabled = false;
         boutonMaj.textContent = 'Mettre à jour → v' + nouvelle;
+        // Visible meme barre repliee, seul signal dans ce cas.
+        poignee.classList.add('wfa-maj');
+        poignee.title = 'Rouvrir la barre — mise a jour disponible';
       }).catch(function () {});
     }
     boutonMaj.addEventListener('click', function () {

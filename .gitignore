@@ -2,3 +2,4 @@ node_modules/
 src-tauri/target/
 SECRETS-GITHUB.txt
 *.key
+*.avant-*

@@ -62,4 +62,84 @@ for (const chemin of ['/fivem/anticheat', '/admin/sessions', '/admin/panel-fivem
 assert.ok(src.includes('.retour { display: none !important; }'), 'bouton retour masque');
 ok('ajustements par categorie');
 
+// --- Tous les outils du hub (28/08/2026) -----------------------------------
+// La barre doit lister les MEMES 18 outils que worldfa.fr/admin : un outil
+// present dans le hub et absent ici serait introuvable dans l'application.
+const CHEMINS = [
+  '/fivem', '/fivem/stats', '/admin/reports', '/fivem/anticheat', '/admin/panel-fivem',
+  '/ticket', '/admin/giveaway', '/admin/boost', '/achat-boutique',
+  '/admin/planning', '/ticket/stats-tickets', '/forms/gestion', '/forms/admin', '/forms/candidature-pole-ggo',
+  '/admin/sessions', '/admin/wiki', '/graph', '/groupe-graph'
+];
+for (const chemin of CHEMINS) {
+  assert.ok(src.includes("'" + chemin + "'"), 'outil manquant dans la barre : ' + chemin);
+}
+for (const titre of ['Serveur de jeu', 'Joueurs & récompenses', 'Équipe & candidatures', 'Site & supervision']) {
+  assert.ok(src.includes("'" + titre + "'"), 'groupe manquant : ' + titre);
+}
+ok('les 18 outils, dans leurs 4 groupes');
+
+// Aucun doublon : un chemin liste deux fois allumerait deux liens actifs.
+const listes = [...src.matchAll(/\{ chemin: '([^']+)'/g)].map((m) => m[1]);
+assert.equal(new Set(listes).size, listes.length, 'chemin en double dans GROUPES');
+assert.equal(listes.length, 18, '18 liens attendus, ' + listes.length + ' trouves');
+ok('aucun doublon de chemin');
+
+// --- Le lien actif : correspondance la PLUS LONGUE --------------------------
+// Le vrai piege des chemins emboites : /fivem/stats commence par /fivem. Une
+// correspondance de prefixe naive allumait deux liens — ou le mauvais. La
+// fonction est extraite et REELLEMENT exercee : un simple grep de source
+// n'aurait rien prouve.
+const texteFonction = src.slice(src.indexOf('function cheminLePlusPrecis'));
+const corps = texteFonction.slice(0, texteFonction.indexOf('\n  }') + 4);
+const fabriquer = (pathname) => new Function('location', corps + '; return cheminLePlusPrecis;')({ pathname });
+
+for (const [pathname, attendu] of [
+  ['/fivem', '/fivem'],
+  ['/fivem/stats', '/fivem/stats'],
+  ['/fivem/anticheat', '/fivem/anticheat'],
+  ['/ticket', '/ticket'],
+  ['/ticket/stats-tickets', '/ticket/stats-tickets'],
+  ['/forms/gestion', '/forms/gestion'],
+  // Sous-page d'un outil : c'est bien l'outil qui reste allume.
+  ['/admin/giveaway/quelque-chose', '/admin/giveaway'],
+  // Rien de connu : aucun lien allume, et surtout pas le premier de la liste.
+  ['/une-page-inconnue', ''],
+  // Piege du prefixe sans separateur : /fivemachin n'est PAS /fivem.
+  ['/fivemachin', '']
+]) {
+  const choisir = fabriquer(pathname);
+  assert.equal(choisir(CHEMINS), attendu, 'lien actif sur ' + pathname);
+}
+ok('lien actif : le chemin le plus precis gagne');
+
+// Les pages qu'on NE touche PAS : plusieurs se calent en height:100vh
+// (Support-World), un padding-top impose y decalerait la mise en page.
+for (const chemin of ['/ticket', '/fivem', '/graph', '/groupe-graph', '/forms/gestion']) {
+  assert.ok(!src.includes("'" + chemin + "':"), 'ajustement pose a tort sur ' + chemin);
+}
+ok('aucun ajustement a l aveugle');
+
+// Les pages worldfa au gabarit admin, elles, DOIVENT avoir le leur — sinon
+// leur bouton retour double la barre et une bande vide s'ouvre en tete.
+// /admin/planning et /admin/wiki nomment ce bouton « back » et non
+// « retour » : c'est ce qui les avait fait oublier (revue du 28/08/2026).
+for (const chemin of ['/admin/reports', '/admin/boost', '/admin/planning', '/admin/wiki']) {
+  assert.ok(src.includes("'" + chemin + "':"), 'ajustement manquant pour ' + chemin);
+}
+// Le selecteur doit viser le SEUL lien de retour : admin-wiki porte un second
+// .back (« Voir la page publique ») qu'un « .back » nu effacerait aussi.
+assert.ok(src.includes('.back[href="/admin"] { display: none !important; }'), 'retour .back masque');
+assert.ok(!src.includes("'.back { display: none !important; }'"), 'selecteur .back trop large');
+ok('ajustements des pages du gabarit admin');
+
+// Barre repliee : tout le panneau est masque, BOUTON DE MISE A JOUR COMPRIS,
+// et le repli est memorise (localStorage). Sans pastille sur la poignee, on
+// pouvait rester des semaines sans jamais voir qu'une version attend
+// (defaut anterieur, releve par la revue du 28/08/2026).
+assert.ok(src.includes('body.wfa-replie #wfa-app-bar { display: none; }'), 'repli masque bien la barre');
+assert.ok(src.includes("poignee.classList.add('wfa-maj')"), 'pastille posee quand une maj attend');
+assert.ok(src.includes('#wfa-app-poignee.wfa-maj::after'), 'style de la pastille');
+ok('mise a jour signalee barre repliee');
+
 console.log('\nBarre laterale : tous les invariants tiennent.');
