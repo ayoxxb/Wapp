@@ -142,4 +142,32 @@ assert.ok(src.includes("poignee.classList.add('wfa-maj')"), 'pastille posee quan
 assert.ok(src.includes('#wfa-app-poignee.wfa-maj::after'), 'style de la pastille');
 ok('mise a jour signalee barre repliee');
 
+// --- Tableau de bord de moderation (28/08/2026) -----------------------------
+// Invariants rapides ; le rendu reel (ouverture, actions, recherche, 403) est
+// verifie par test/banc-moderation.mjs, qui lance un vrai navigateur.
+assert.ok(src.includes('poserModeration()'), 'moderation posee depuis poser()');
+// Le panneau vit APRES la garde SUR_WORLDFA : rien ne doit s'afficher ni se
+// sonder sur discord.com pendant l'OAuth.
+// L'APPEL (avec le point-virgule), pas la declaration : `poserModeration()`
+// nu attrapait d'abord `function poserModeration()`, qui vit forcement plus
+// haut — l'assertion echouait sur du code pourtant juste.
+assert.ok(src.indexOf('if (!SUR_WORLDFA) return;') < src.indexOf('poserModeration();'),
+  'moderation posee apres la garde d origine');
+// Les quatre gestes, sur les chemins REELS de Support-World (prefixe /fivem
+// ajoute par modApi : Apache le retire).
+for (const route of ['/api/fivem/kick', '/api/fivem/ban', '/api/fivem/freeze', '/api/fivem/message', '/api/fivem-players']) {
+  assert.ok(src.includes("'" + route + "'"), 'route ' + route);
+}
+// Le ban de cette fenetre est TEMPORAIRE : la route refuse minutes <= 0.
+assert.ok(src.includes('minutes') && src.includes('Duree invalide'), 'ban : duree exigee');
+// Le gel est une bascule sans idempotence : un verrou par joueur est
+// obligatoire, sinon un double-clic degele ce qu'on vient de geler.
+assert.ok(src.includes('MOD.enCours[id]'), 'verrou par joueur');
+// Sans promotion de session sur /api/, un 401 doit etre rejoue apres avoir
+// charge une page Support-World.
+assert.ok(src.includes('reveillerSession') && src.includes('modApiSure'), 'reveil de session sur 401');
+// Rien ne tourne panneau ferme.
+assert.ok(src.includes('clearInterval(MOD.minuteur)'), 'sondage arrete a la fermeture');
+ok('tableau de bord de moderation');
+
 console.log('\nBarre laterale : tous les invariants tiennent.');

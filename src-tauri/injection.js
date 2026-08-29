@@ -151,6 +151,379 @@
     return;
   }
 
+
+  // =========================================================================
+  // TABLEAU DE BORD DE MODERATION (28/08/2026, demande)
+  // =========================================================================
+  // Un ecran propre a l'APPLICATION, pose par-dessus la page courante : etat
+  // du serveur, joueurs connectes en direct, et les quatre gestes de
+  // moderation (message, gel, kick, ban) sans changer de page. Ctrl+K l'ouvre
+  // directement sur la recherche.
+  //
+  // Il parle aux API de Support-World, servies sous /fivem/ par Apache
+  // (ProxyPass /fivem/ -> 127.0.0.1:3002/). Contrats releves DANS LE CODE de
+  // Support-World, pas supposes — les cinq pieges qui ont dicte ce qui suit :
+  //
+  //   1. SEUL le cookie `sw_dashboard_session` authentifie ; le `?token=` des
+  //      pages est ignore des que le SSO est actif. Et il n'y a AUCUNE
+  //      promotion de session sur un chemin /api/ : appeler l'API sans avoir
+  //      ouvert une page Support-World au moins une fois rend 401. D'ou
+  //      `reveillerSession()` : on charge /fivem/ une fois, puis on rejoue.
+  //   2. /api/fivem-players rend TOUJOURS 200, meme serveur de jeu eteint —
+  //      c'est le champ `online` qui tranche, jamais le code HTTP.
+  //   3. Le ban par cette route exige des MINUTES > 0 : le permanent n'existe
+  //      pas ici (il passe par ban-identity, volontairement laisse au site).
+  //   4. Le gel est une BASCULE sans parametre ni idempotence : rejouer
+  //      l'appel degele. D'ou le verrou par joueur pendant l'envoi.
+  //   5. La vie renvoyee par le jeu est BRUTE, de 100 a 200 (100 = mort).
+  //
+  // Le sondage est a 6 s : la liste est mise en cache 1,5 s cote serveur, et
+  // chaque appel marque le staff « actif » sur le dashboard — inutile de
+  // taper plus vite. Rien ne tourne quand le panneau est ferme.
+  var MOD = {
+    ouvert: false,
+    minuteur: null,
+    joueurs: [],
+    enligne: false,
+    filtre: '',
+    erreur: '',
+    enCours: {},
+    sessionReveillee: false
+  };
+  var MOD_PERIODE = 6000;
+
+  function modApi(chemin, corps) {
+    var options = { credentials: 'same-origin', headers: { 'Accept': 'application/json' } };
+    if (corps) {
+      options.method = 'POST';
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(corps);
+    }
+    return fetch('/fivem' + chemin, options).then(function (r) {
+      if (r.status === 401) {
+        var err = new Error('session');
+        err.session = true;
+        throw err;
+      }
+      if (r.status === 403) {
+        var err3 = new Error('droit');
+        err3.droit = true;
+        throw err3;
+      }
+      return r.json().catch(function () { return {}; });
+    });
+  }
+
+  // Charge une PAGE de Support-World : c'est elle qui promeut la session
+  // worldfa en cookie sw_dashboard_session. Les chemins /api/ ne le font pas.
+  function reveillerSession() {
+    if (MOD.sessionReveillee) return Promise.resolve(false);
+    MOD.sessionReveillee = true;
+    return fetch('/fivem/', { credentials: 'same-origin' }).then(function () { return true; })
+      .catch(function () { return false; });
+  }
+
+  // Un appel qui echoue en 401 est rejoue UNE fois, apres reveil de session.
+  function modApiSure(chemin, corps) {
+    return modApi(chemin, corps).catch(function (e) {
+      if (!e || !e.session) throw e;
+      return reveillerSession().then(function (fait) {
+        if (!fait) throw e;
+        return modApi(chemin, corps);
+      });
+    });
+  }
+
+  function modEchapper(t) {
+    return String(t === null || t === undefined ? '' : t)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function modStyle() {
+    var s = document.createElement('style');
+    s.textContent = [
+      '#wfa-mod { position: fixed; top: ' + HAUTEUR_TITRE + 'px; left: 0; right: 0; bottom: 0;',
+      '  z-index: 2147482000; background: #0b0b0c; display: none; flex-direction: column;',
+      '  font-family: "Segoe UI", Arial, sans-serif; color: #e0e0e0; }',
+      '#wfa-mod.ouvert { display: flex; }',
+      '#wfa-mod .mod-tete { display: flex; align-items: center; gap: 14px; padding: 14px 20px;',
+      '  border-bottom: 1px solid rgba(255,255,255,0.08); flex: none; }',
+      '#wfa-mod .mod-titre { font-size: 12px; font-weight: 700; letter-spacing: 3px;',
+      '  text-transform: uppercase; color: rgba(255,255,255,0.85); }',
+      '#wfa-mod .mod-titre span { color: rgba(220,100,100,0.95); }',
+      '#wfa-mod .mod-tuiles { display: flex; gap: 10px; margin-left: 8px; }',
+      '#wfa-mod .mod-tuile { border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02);',
+      '  padding: 5px 11px; min-width: 78px; }',
+      '#wfa-mod .mod-tuile b { display: block; font-size: 15px; color: rgba(255,255,255,0.9);',
+      '  font-variant-numeric: tabular-nums; line-height: 1.1; }',
+      '#wfa-mod .mod-tuile i { font-style: normal; font-size: 8.5px; letter-spacing: 1.3px;',
+      '  text-transform: uppercase; color: rgba(255,255,255,0.28); }',
+      '#wfa-mod .mod-tuile.hs b { color: rgba(220,100,100,0.95); }',
+      '#wfa-mod .mod-tuile.ok b { color: #34d399; }',
+      '#wfa-mod input.mod-rech { flex: 1; max-width: 340px; margin-left: auto; background: #08080a;',
+      '  border: 1px solid rgba(255,255,255,0.12); color: #e0e0e0; font-family: inherit;',
+      '  font-size: 12.5px; padding: 8px 11px; }',
+      '#wfa-mod input.mod-rech:focus { outline: none; border-color: rgba(255,255,255,0.3); }',
+      '#wfa-mod .mod-fermer { border: 1px solid rgba(255,255,255,0.12); background: transparent;',
+      '  color: rgba(255,255,255,0.45); font-family: inherit; font-size: 11px; font-weight: 700;',
+      '  letter-spacing: 1.5px; text-transform: uppercase; padding: 8px 14px; cursor: pointer; }',
+      '#wfa-mod .mod-fermer:hover { background: rgba(255,255,255,0.06); color: #fff; }',
+      '#wfa-mod .mod-corps { flex: 1; overflow-y: auto; padding: 0 20px 20px; }',
+      '#wfa-mod .mod-avis { margin: 14px 0; padding: 11px 14px; border: 1px solid rgba(220,100,100,0.35);',
+      '  background: rgba(220,100,100,0.07); color: rgba(220,100,100,0.95); font-size: 12px; }',
+      '#wfa-mod table { width: 100%; border-collapse: collapse; font-size: 12.5px; }',
+      '#wfa-mod th { position: sticky; top: 0; background: #0b0b0c; text-align: left; padding: 10px;',
+      '  border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 8.5px; font-weight: 700;',
+      '  letter-spacing: 1.4px; text-transform: uppercase; color: rgba(255,255,255,0.28); }',
+      '#wfa-mod td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,0.045); vertical-align: middle; }',
+      '#wfa-mod td.num { font-variant-numeric: tabular-nums; white-space: nowrap; color: rgba(255,255,255,0.55); }',
+      '#wfa-mod .mod-nom { color: rgba(255,255,255,0.9); }',
+      '#wfa-mod .mod-sous { display: block; font-size: 10.5px; color: rgba(255,255,255,0.3); }',
+      '#wfa-mod .mod-eti { display: inline-block; padding: 1px 6px; border: 1px solid rgba(255,255,255,0.12);',
+      '  font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;',
+      '  color: rgba(255,255,255,0.45); margin-left: 6px; }',
+      '#wfa-mod .mod-eti.staff { color: #34d399; border-color: rgba(52,211,153,0.35); }',
+      '#wfa-mod .mod-eti.gele { color: #fbbf24; border-color: rgba(251,191,36,0.35); }',
+      '#wfa-mod .mod-actes { display: flex; gap: 6px; justify-content: flex-end; }',
+      '#wfa-mod .mod-acte { border: 1px solid rgba(255,255,255,0.12); background: transparent;',
+      '  color: rgba(255,255,255,0.45); font-family: inherit; font-size: 10px; font-weight: 700;',
+      '  letter-spacing: 1px; text-transform: uppercase; padding: 5px 9px; cursor: pointer; }',
+      '#wfa-mod .mod-acte:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: #fff; }',
+      '#wfa-mod .mod-acte:disabled { opacity: 0.35; cursor: wait; }',
+      '#wfa-mod .mod-acte.danger { color: rgba(220,100,100,0.8); border-color: rgba(220,100,100,0.28); }',
+      '#wfa-mod .mod-acte.danger:hover:not(:disabled) { background: rgba(200,60,60,0.14); color: rgba(220,100,100,1); }',
+      '#wfa-mod .mod-vide { padding: 40px; text-align: center; color: rgba(255,255,255,0.25); font-size: 12.5px; }',
+      '#wfa-mod .mod-pied { flex: none; padding: 8px 20px; border-top: 1px solid rgba(255,255,255,0.06);',
+      '  font-size: 10.5px; color: rgba(255,255,255,0.25); }'
+    ].join('\n');
+    document.head.appendChild(s);
+  }
+
+  function modConstruire() {
+    modStyle();
+    var v = document.createElement('div');
+    v.id = 'wfa-mod';
+    v.innerHTML =
+      '<div class="mod-tete">' +
+        '<div class="mod-titre">Mode<span>ration</span></div>' +
+        '<div class="mod-tuiles" id="mod-tuiles"></div>' +
+        '<input class="mod-rech" id="mod-rech" type="text" placeholder="Rechercher : pseudo, personnage, IDUnique, Discord…" autocomplete="off">' +
+        '<button type="button" class="mod-fermer" id="mod-fermer">Fermer (Echap)</button>' +
+      '</div>' +
+      '<div class="mod-corps" id="mod-corps"></div>' +
+      '<div class="mod-pied" id="mod-pied"></div>';
+    document.body.appendChild(v);
+
+    document.getElementById('mod-fermer').addEventListener('click', function () { modBasculer(false); });
+    var rech = document.getElementById('mod-rech');
+    rech.addEventListener('input', function () { MOD.filtre = rech.value.trim().toLowerCase(); modRendre(); });
+    // Les touches du panneau ne doivent pas remonter a la page dessous.
+    rech.addEventListener('keydown', function (e) { e.stopPropagation(); });
+    return v;
+  }
+
+  function modVisible() {
+    var f = MOD.filtre;
+    if (!f) return MOD.joueurs;
+    return MOD.joueurs.filter(function (j) {
+      return [j.name, j.characterName, j.uid, j.discordName, j.discordId, String(j.id)]
+        .some(function (c) { return c && String(c).toLowerCase().indexOf(f) !== -1; });
+    });
+  }
+
+  var MOD_ETATS = {
+    dead: 'mort', coma: 'coma', ghost: 'invisible', armour: 'kevlar', vehicle: 'vehicule'
+  };
+
+  function modRendre() {
+    if (!MOD.ouvert) return;
+    var tuiles = document.getElementById('mod-tuiles');
+    var corps = document.getElementById('mod-corps');
+    if (!tuiles || !corps) return;
+
+    var staff = MOD.joueurs.filter(function (j) { return j.staff; }).length;
+    // `online` est le SEUL juge : l'API rend 200 meme serveur eteint.
+    tuiles.innerHTML =
+      '<div class="mod-tuile ' + (MOD.enligne ? 'ok' : 'hs') + '"><b>' + (MOD.enligne ? 'En ligne' : 'Hors ligne') + '</b><i>serveur</i></div>' +
+      '<div class="mod-tuile"><b>' + MOD.joueurs.length + '</b><i>joueurs</i></div>' +
+      '<div class="mod-tuile"><b>' + staff + '</b><i>staff en jeu</i></div>';
+
+    var liste = modVisible();
+    var html = '';
+    if (MOD.erreur) html += '<div class="mod-avis">' + modEchapper(MOD.erreur) + '</div>';
+
+    if (!liste.length) {
+      html += '<div class="mod-vide">' +
+        (MOD.joueurs.length ? 'Aucun joueur ne correspond a cette recherche.'
+          : (MOD.enligne ? 'Personne en jeu.' : 'Serveur de jeu injoignable.')) + '</div>';
+    } else {
+      html += '<table><thead><tr>' +
+        '<th style="width:52px">ID</th><th>Joueur</th><th style="width:120px">IDUnique</th>' +
+        '<th style="width:64px">Ping</th><th style="width:64px">FPS</th><th style="width:96px">Etat</th>' +
+        '<th style="width:250px"></th></tr></thead><tbody>';
+      for (var i = 0; i < liste.length; i += 1) {
+        var j = liste[i];
+        var occupe = MOD.enCours[j.id] ? ' disabled' : '';
+        html += '<tr>' +
+          '<td class="num">' + modEchapper(j.id) + '</td>' +
+          '<td><span class="mod-nom">' + modEchapper(j.characterName || j.name) + '</span>' +
+            (j.staff ? '<span class="mod-eti staff">staff</span>' : '') +
+            '<span class="mod-sous">' + modEchapper(j.name) +
+            (j.discordName ? ' · ' + modEchapper(j.discordName) : '') + '</span></td>' +
+          '<td class="num">' + modEchapper(j.uid || '—') + '</td>' +
+          '<td class="num">' + modEchapper(j.ping === null || j.ping === undefined ? '—' : j.ping) + '</td>' +
+          // fps null = mesure absente, ce n'est pas zero.
+          '<td class="num">' + (j.fps === null || j.fps === undefined ? '—' : modEchapper(j.fps)) + '</td>' +
+          '<td>' + modEchapper(MOD_ETATS[j.status] || '—') + '</td>' +
+          '<td><div class="mod-actes">' +
+            '<button type="button" class="mod-acte" data-acte="message" data-id="' + modEchapper(j.id) + '"' + occupe + '>Message</button>' +
+            '<button type="button" class="mod-acte" data-acte="freeze" data-id="' + modEchapper(j.id) + '"' + occupe + '>Gel</button>' +
+            '<button type="button" class="mod-acte danger" data-acte="kick" data-id="' + modEchapper(j.id) + '"' + occupe + '>Kick</button>' +
+            '<button type="button" class="mod-acte danger" data-acte="ban" data-id="' + modEchapper(j.id) + '"' + occupe + '>Ban</button>' +
+          '</div></td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+    corps.innerHTML = html;
+  }
+
+  function modCharger() {
+    return modApiSure('/api/fivem-players').then(function (d) {
+      MOD.enligne = Boolean(d && d.online);
+      MOD.joueurs = (d && d.players) || [];
+      MOD.erreur = '';
+    }).catch(function (e) {
+      MOD.joueurs = [];
+      MOD.enligne = false;
+      MOD.erreur = e && e.droit
+        ? 'Acces refuse : il faut la permission « Gestion FiveM » (ou la cle) pour voir les joueurs.'
+        : (e && e.session
+          ? 'Session non reconnue. Ouvre « Gestion FiveM » une fois dans la barre, puis reviens.'
+          : 'Liste des joueurs illisible (serveur injoignable).');
+    }).then(function () {
+      modRendre();
+      var pied = document.getElementById('mod-pied');
+      if (pied) pied.textContent = 'Rafraichi toutes les 6 s · le ban par cette fenetre est TEMPORAIRE (le permanent reste sur la page Gestion FiveM)';
+    });
+  }
+
+  function modJoueur(id) {
+    for (var i = 0; i < MOD.joueurs.length; i += 1) {
+      if (String(MOD.joueurs[i].id) === String(id)) return MOD.joueurs[i];
+    }
+    return null;
+  }
+
+  // Les quatre gestes. Le VERROU par joueur n'est pas une precaution de
+  // style : le gel est une bascule sans idempotence cote jeu, un double-clic
+  // (ou un renvoi apres timeout) degelerait celui qu'on vient de geler.
+  function modAgir(acte, id) {
+    var j = modJoueur(id);
+    if (!j || MOD.enCours[id]) return;
+
+    var corps = { playerId: j.id, playerName: j.characterName || j.name };
+    var confirmation = '';
+
+    if (acte === 'message') {
+      var texte = window.prompt('Message a envoyer en jeu a ' + (j.characterName || j.name) + ' :', '');
+      if (texte === null) return;
+      texte = String(texte).trim();
+      // Le jeu refuse une chaine vide ('empty_message') : autant le dire ici.
+      if (!texte) { window.alert('Message vide : rien envoye.'); return; }
+      corps.message = texte;
+      corps.playerDiscordId = j.discordId || undefined;
+    } else if (acte === 'kick') {
+      var motif = window.prompt('Motif du kick de ' + (j.characterName || j.name) + ' :', '');
+      if (motif === null) return;
+      corps.reason = String(motif).trim();
+    } else if (acte === 'ban') {
+      // Cette route n'accepte QUE des minutes > 0 — le permanent passe par
+      // ban-identity, laisse a la page Gestion FiveM.
+      var duree = window.prompt('Duree du ban en MINUTES (le permanent se fait sur la page Gestion FiveM) :', '60');
+      if (duree === null) return;
+      var minutes = parseInt(String(duree).trim(), 10);
+      if (!minutes || minutes <= 0) { window.alert('Duree invalide : il faut un nombre de minutes superieur a zero.'); return; }
+      var motifBan = window.prompt('Motif du ban :', '');
+      if (motifBan === null) return;
+      corps.minutes = minutes;
+      corps.reason = String(motifBan).trim();
+      confirmation = 'Bannir ' + (j.characterName || j.name) + ' pendant ' + minutes + ' minute(s) ?';
+    } else if (acte === 'freeze') {
+      confirmation = 'Basculer le gel de ' + (j.characterName || j.name) + ' ? (c\'est une bascule : geler / degeler)';
+    }
+
+    if (confirmation && !window.confirm(confirmation)) return;
+
+    MOD.enCours[id] = true;
+    modRendre();
+
+    var chemins = { message: '/api/fivem/message', kick: '/api/fivem/kick', ban: '/api/fivem/ban', freeze: '/api/fivem/freeze' };
+    modApiSure(chemins[acte], corps).then(function (r) {
+      if (r && r.ok) {
+        if (acte === 'freeze') {
+          window.alert((j.characterName || j.name) + (r.frozen ? ' est GELE.' : ' est DEGELE.'));
+        }
+        return;
+      }
+      // Les erreurs du jeu arrivent en clair : on les montre telles quelles
+      // plutot qu'un « echec » qui obligerait a ouvrir les journaux.
+      window.alert('Action refusee : ' + ((r && r.error) || 'raison inconnue'));
+    }).catch(function (e) {
+      window.alert(e && e.droit ? 'Permission insuffisante pour cette action.'
+        : (e && e.session ? 'Session non reconnue : ouvre « Gestion FiveM » une fois, puis reessaie.'
+          : 'Serveur injoignable : action non effectuee.'));
+    }).then(function () {
+      delete MOD.enCours[id];
+      modCharger();
+    });
+  }
+
+  function modBasculer(ouvrir, surRecherche) {
+    var v = document.getElementById('wfa-mod') || modConstruire();
+    MOD.ouvert = Boolean(ouvrir);
+    v.classList.toggle('ouvert', MOD.ouvert);
+
+    if (MOD.ouvert) {
+      modRendre();
+      modCharger();
+      // Rien ne tourne quand le panneau est ferme.
+      if (!MOD.minuteur) MOD.minuteur = setInterval(modCharger, MOD_PERIODE);
+      if (surRecherche) {
+        var r = document.getElementById('mod-rech');
+        if (r) { r.focus(); r.select(); }
+      }
+    } else if (MOD.minuteur) {
+      clearInterval(MOD.minuteur);
+      MOD.minuteur = null;
+    }
+  }
+
+  function poserModeration() {
+    var v = modConstruire();
+
+    // Delegation : les lignes sont reconstruites a chaque rafraichissement,
+    // un ecouteur par bouton fuirait a chaque passage.
+    v.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('.mod-acte') : null;
+      if (b && !b.disabled) modAgir(b.getAttribute('data-acte'), b.getAttribute('data-id'));
+    });
+
+    // Ctrl+K ouvre sur la recherche, Echap ferme. Le raccourci est pose sur
+    // la fenetre en capture : sinon un champ de la page dessous l'avalerait.
+    window.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        modBasculer(true, true);  // Ctrl+K OUVRE toujours et donne le focus a la recherche
+        return;
+      }
+      if (e.key === 'Escape' && MOD.ouvert) {
+        e.preventDefault();
+        modBasculer(false);
+      }
+    }, true);
+  }
+
   function poser() {
     if (!document.body) return;
     poserBarreTitre();
@@ -271,6 +644,12 @@
       'body { margin-left: ' + LARGEUR + 'px !important; }',
       'body.wfa-replie { margin-left: 0 !important; }',
       'body.wfa-replie #wfa-app-bar { display: none; }',
+      '#wfa-app-bar nav a.wfa-mod-ouvrir { margin: 2px 10px 8px; padding: 9px 12px;',
+      '  border: 1px solid rgba(220,100,100,0.3); background: rgba(200,60,60,0.10);',
+      '  color: rgba(255,255,255,0.8); display: flex; align-items: center; justify-content: space-between; }',
+      '#wfa-app-bar nav a.wfa-mod-ouvrir:hover { background: rgba(200,60,60,0.2); color: #fff; }',
+      '#wfa-app-bar nav a.wfa-mod-ouvrir span { font-size: 8.5px; letter-spacing: 0.5px;',
+      '  color: rgba(255,255,255,0.3); }',
       'body.wfa-replie #wfa-app-poignee { display: block; }',
       /* Pastille de mise a jour sur la poignee : la barre repliee cache le
          bouton, et le repli est memorise. Sans ce point, rien ne signalait
@@ -296,6 +675,14 @@
     barre.appendChild(titre);
 
     var nav = document.createElement('nav');
+
+    var accesMod = document.createElement('a');
+    accesMod.className = 'wfa-mod-ouvrir';
+    accesMod.href = '#';
+    accesMod.innerHTML = 'Moderation <span>Ctrl+K</span>';
+    accesMod.addEventListener('click', function (e) { e.preventDefault(); modBasculer(true, true); });
+    nav.appendChild(accesMod);
+
     var tousLesChemins = [];
     for (var g = 0; g < GROUPES.length; g += 1) {
       for (var j = 0; j < GROUPES[g].liens.length; j += 1) tousLesChemins.push(GROUPES[g].liens[j].chemin);
@@ -330,6 +717,8 @@
     barre.appendChild(pied);
 
     document.body.appendChild(barre);
+
+    poserModeration();
 
     var poignee = document.createElement('div');
     poignee.id = 'wfa-app-poignee';
