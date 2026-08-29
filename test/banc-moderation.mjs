@@ -10,7 +10,12 @@ const JOUEURS = [
   { id: 27, name: 'z1nn', characterName: 'Nina Vasquez', uid: '9876-2', ping: 88, fps: null, staff: false, status: 'coma', discordName: null }
 ];
 
-function rendre(scenario, script) {
+// LARGEUR DE RENDU EXPLICITE. Le defaut de Chrome sans tete est 780x493 : sous
+// le seuil de repli automatique de la barre (1100 px), elle s'y masquait toute
+// seule et les controles qui la regardent ne prouvaient plus rien. On rend donc
+// dans une fenetre courante, et le repli a son propre controle (10) qui, lui,
+// choisit sa largeur.
+function rendre(scenario, script, largeur) {
   const stub = `<script>
     window.__WFA_APP_TEST = true;
     window.__SCENARIO = ${JSON.stringify(scenario)};
@@ -67,6 +72,7 @@ ${stub}<script>${INJ}</script>
   const f = '/tmp/claude-1000/-home-ubuntu/3b36268d-f4bd-42d0-972d-cf7fb4a19c21/scratchpad/mod/p.html';
   writeFileSync(f, page);
   const dom = execFileSync(CHROME, ['--headless=new', '--no-sandbox', '--disable-gpu',
+    '--window-size=' + (largeur || 1400) + ',900',
     '--virtual-time-budget=4000', '--dump-dom', 'file://' + f],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 60000 });
   const err = dom.match(/<pre id="err">([^<]*)</);
@@ -84,7 +90,11 @@ const releve = (extra) => `
     boutons: document.querySelectorAll('#wfa-mod .mod-acte').length,
     tuiles: (document.getElementById('mod-tuiles')||{}).textContent || '',
     avis: (document.querySelector('#wfa-mod .mod-avis')||{}).textContent || '',
-    entreeBarre: vis(document.querySelector('.wfa-mod-ouvrir')),
+    entreeBarre: vis(document.getElementById('wfa-app-bar')) && vis(document.querySelector('.wfa-mod-ouvrir')),
+    barreRepliee: document.body.classList.contains('wfa-replie'),
+    barreVisible: vis(document.getElementById('wfa-app-bar')),
+    poigneeVisible: vis(document.getElementById('wfa-app-poignee')),
+    margeBody: getComputedStyle(document.body).marginLeft,
     focusRecherche: document.activeElement === document.getElementById('mod-rech'),
     kill: !!document.querySelector('#wfa-mod [data-acte=kill]')
     ${extra || ''}
@@ -162,6 +172,39 @@ r = rendre('normal', `document.querySelector('.wfa-mod-ouvrir').click();
   setTimeout(function(){ ${releve()} }, 700);`);
 /2\s*reports en attente/i.test(r.tuiles.replace(/\s+/g,' ')) ? ok('tuile reports (2 non clotures)') : ko('tuiles : ' + r.tuiles);
 /4\s*tickets ouverts/i.test(r.tuiles.replace(/\s+/g,' ')) ? ok('tuile tickets') : ko('tuiles : ' + r.tuiles);
+
+// 10. UNE SEULE barre de defilement. Le panneau couvre la page mais ne
+// l'empechait pas de defiler : sa barre restait visible A DROITE de celle du
+// panneau. On mesure la largeur reellement prise par la barre du document
+// (innerWidth - clientWidth), panneau ouvert puis referme.
+r = rendre('normal', `document.body.insertAdjacentHTML('afterbegin', '<div style="height:3000px"></div>');
+  window.scrollTo(0, 400);
+  document.querySelector('.wfa-mod-ouvrir').click();
+  setTimeout(function(){
+    var pendant = window.innerWidth - document.scrollingElement.clientWidth;
+    window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    ${releve(`, barrePendant: pendant,
+      barreApres: window.innerWidth - document.scrollingElement.clientWidth,
+      defilementApres: document.scrollingElement.scrollTop`)} }, 400);`);
+r.barrePendant === 0 ? ok('panneau ouvert : une seule barre de defilement')
+  : ko('barre de la page encore la (' + r.barrePendant + ' px) : deux barres');
+r.barreApres > 0 ? ok('fermeture : la page redefile') : ko('la page reste figee apres fermeture');
+r.defilementApres === 400 ? ok('position de defilement conservee') : ko('defilement -> ' + r.defilementApres);
+
+// 11. Fenetre etroite : la barre se replie TOUTE SEULE et rend ses 210 px a la
+// page. Sans cela, les pages du site (qui decident de leur disposition sur la
+// largeur de la FENETRE) gardaient une mise en page trop large pour la place
+// reelle — sur « Gestion FiveM » a 950 px, la colonne des bans depassait de
+// 124 px hors de l'ecran, sans defilement pour la rejoindre.
+r = rendre('normal', releve(), 950);
+r.barreRepliee ? ok('fenetre etroite : barre repliee d office') : ko('barre encore deployee a 950 px');
+r.margeBody === '0px' ? ok('la page recupere toute la largeur') : ko('marge du body : ' + r.margeBody);
+r.poigneeVisible ? ok('poignee ≡ disponible pour la rouvrir') : ko('poignee absente : barre irrecuperable');
+
+// 12. Fenetre large : rien ne bouge, la barre reste en place.
+r = rendre('normal', releve(), 1400);
+r.barreRepliee === false ? ok('fenetre large : barre deployee') : ko('barre repliee sans raison a 1400 px');
+r.margeBody === '210px' ? ok('la page est decalee de la largeur de la barre') : ko('marge du body : ' + r.margeBody);
 
 console.log(echecs ? '\n' + echecs + ' echec(s).' : '\nPanneau de moderation : tout passe.');
 process.exit(echecs ? 1 : 0);

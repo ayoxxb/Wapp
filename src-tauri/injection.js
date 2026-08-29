@@ -86,6 +86,15 @@
   // bouton fermer. data-tauri-drag-region rend la bande saisissable a la
   // souris et le double-clic agrandit, comme une vraie barre de titre.
   function poserBarreTitre() {
+    // La barre de titre RECOUVRE le haut de la page : rien dans la fenetre ne
+    // reserve ses 34 px. Les pages qui se calent en `height: 100vh` (Gestion
+    // FiveM, ticket...) depassaient donc d'autant par le bas, hors de l'ecran
+    // et sans defilement possible. On publie la hauteur ; c'est a la page de
+    // s'en servir (`calc(100vh - var(--wfa-app-haut, 0px))`), ce qui laisse le
+    // reglage cote SITE — modifiable sans republier le binaire — et ne change
+    // rien dans un navigateur, ou la variable n'existe pas.
+    document.documentElement.style.setProperty('--wfa-app-haut', HAUTEUR_TITRE + 'px');
+
     var style = document.createElement('style');
     style.textContent = [
       '#wfa-titlebar { position: fixed; top: 0; left: 0; right: 0; height: ' + HAUTEUR_TITRE + 'px;',
@@ -301,6 +310,11 @@
       '  letter-spacing: 1.5px; text-transform: uppercase; padding: 8px 14px; cursor: pointer; }',
       '#wfa-mod .mod-fermer:hover { background: rgba(255,255,255,0.06); color: #fff; }',
       '#wfa-mod .mod-corps { flex: 1; overflow-y: auto; padding: 0 20px 20px; }',
+      // Le panneau couvre la page mais ne l'empeche pas de defiler : sa barre
+      // restait visible A DROITE de celle du panneau (deux barres cote a cote).
+      // On fige la page dessous le temps de l'ouverture ; Chrome garde la
+      // position de defilement, elle revient telle quelle a la fermeture.
+      'html.wfa-mod-ouvert, html.wfa-mod-ouvert body { overflow: hidden !important; }',
       '#wfa-mod .mod-avis { margin: 14px 0; padding: 11px 14px; border: 1px solid rgba(220,100,100,0.35);',
       '  background: rgba(220,100,100,0.07); color: rgba(220,100,100,0.95); font-size: 12px; }',
       '#wfa-mod table { width: 100%; border-collapse: collapse; font-size: 12.5px; }',
@@ -721,6 +735,7 @@
     var v = document.getElementById('wfa-mod') || modConstruire();
     MOD.ouvert = Boolean(ouvrir);
     v.classList.toggle('ouvert', MOD.ouvert);
+    document.documentElement.classList.toggle('wfa-mod-ouvert', MOD.ouvert);
 
     if (MOD.ouvert) {
       modRendre();
@@ -972,14 +987,50 @@
     poignee.addEventListener('click', function () { basculer(false); });
     document.body.appendChild(poignee);
 
-    function basculer(replie) {
+    // `sansMemoire` : un repli AUTOMATIQUE (fenetre etroite) ne doit pas
+    // ecraser le choix de l'utilisateur, sinon la barre ne reviendrait jamais
+    // apres un simple redimensionnement.
+    function basculer(replie, sansMemoire) {
       document.body.classList.toggle('wfa-replie', replie);
-      try { localStorage.setItem(CLE_REPLI, replie ? '1' : ''); } catch (e) {}
+      if (!sansMemoire) { try { localStorage.setItem(CLE_REPLI, replie ? '1' : ''); } catch (e) {} }
       // Les pages qui calculent leur disposition en pixels (multicam, cartes)
       // doivent apprendre que la largeur utile vient de changer.
       try { window.dispatchEvent(new Event('resize')); } catch (e) {}
     }
-    try { if (localStorage.getItem(CLE_REPLI) === '1') basculer(true); } catch (e) {}
+
+    function repliChoisi() {
+      try { return localStorage.getItem(CLE_REPLI) === '1'; } catch (e) { return false; }
+    }
+
+    // FENETRE ETROITE : LA BARRE SE REPLIE TOUTE SEULE.
+    // Les pages du site choisissent leur disposition sur la largeur de la
+    // FENETRE (@media), qui ne dit rien de la place qu'il leur reste : la
+    // barre leur en prend 210. Mesure sur « Gestion FiveM » a 950 px de
+    // fenetre — sous 1101 px la page revient a trois colonnes de largeur
+    // MINIMALE (800 px au total) alors qu'il ne restait que 725 px de large :
+    // la troisieme colonne (« Joueurs bannis ») depassait de 124 px au-dela
+    // du bord droit, et `html { overflow-x: hidden }` interdisait meme d'y
+    // defiler — elle etait simplement coupee.
+    // Rendre sa largeur a la page suffit : sans la barre, ses propres points
+    // de rupture retombent juste. La poignee ≡ reste la pour la rouvrir a la
+    // main, et ce choix-la tient jusqu'au prochain franchissement du seuil.
+    var SEUIL_REPLI = 1100;
+    var repliAuto = false;
+
+    function ajusterALaFenetre() {
+      var etroit = window.innerWidth <= SEUIL_REPLI;
+      if (etroit && !repliAuto && !document.body.classList.contains('wfa-replie')) {
+        repliAuto = true;
+        basculer(true, true);
+      } else if (!etroit && repliAuto) {
+        repliAuto = false;
+        basculer(repliChoisi(), true);
+      }
+    }
+
+    if (repliChoisi()) basculer(true, true);
+    ajusterALaFenetre();
+    window.addEventListener('resize', ajusterALaFenetre);
 
     invoke('version_actuelle').then(function (v) {
       version.textContent = 'version ' + v;
