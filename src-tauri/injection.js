@@ -576,19 +576,18 @@
           : (MOD.enligne ? 'Personne en jeu.' : 'Serveur de jeu injoignable.')) + '</div>';
     } else {
       html += '<table><thead><tr>' +
-        '<th style="width:52px">ID</th><th>Joueur</th><th style="width:120px">IDUnique</th>' +
+        '<th style="width:120px">IDUnique</th><th>Joueur</th>' +
         '<th style="width:64px">Ping</th><th style="width:64px">FPS</th><th style="width:96px">Etat</th>' +
-        '<th style="width:310px"></th></tr></thead><tbody>';
+        '<th style="width:360px"></th></tr></thead><tbody>';
       for (var i = 0; i < liste.length; i += 1) {
         var j = liste[i];
         var occupe = MOD.enCours[j.id] ? ' disabled' : '';
         html += '<tr>' +
-          '<td class="num">' + modEchapper(j.id) + '</td>' +
+          '<td class="num">' + modEchapper(j.uid || '—') + '</td>' +
           '<td><span class="mod-nom">' + modEchapper(j.characterName || j.name) + '</span>' +
             (j.staff ? '<span class="mod-eti staff">staff</span>' : '') +
             '<span class="mod-sous">' + modEchapper(j.name) +
             (j.discordName ? ' · ' + modEchapper(j.discordName) : '') + '</span></td>' +
-          '<td class="num">' + modEchapper(j.uid || '—') + '</td>' +
           '<td class="num">' + modEchapper(j.ping === null || j.ping === undefined ? '—' : j.ping) + '</td>' +
           // fps null = mesure absente, ce n'est pas zero.
           '<td class="num">' + (j.fps === null || j.fps === undefined ? '—' : modEchapper(j.fps)) + '</td>' +
@@ -597,6 +596,7 @@
             '<button type="button" class="mod-acte" data-fiche="enligne" data-cle="' + modEchapper(j.id) + '">Fiche</button>' +
             '<button type="button" class="mod-acte" data-acte="message" data-id="' + modEchapper(j.id) + '"' + occupe + '>Message</button>' +
             '<button type="button" class="mod-acte" data-acte="freeze" data-id="' + modEchapper(j.id) + '"' + occupe + '>Gel</button>' +
+            '<button type="button" class="mod-acte danger" data-acte="kill" data-id="' + modEchapper(j.id) + '"' + occupe + '>Kill</button>' +
             '<button type="button" class="mod-acte danger" data-acte="kick" data-id="' + modEchapper(j.id) + '"' + occupe + '>Kick</button>' +
             '<button type="button" class="mod-acte danger" data-acte="ban" data-id="' + modEchapper(j.id) + '"' + occupe + '>Ban</button>' +
           '</div></td></tr>';
@@ -613,7 +613,7 @@
         html += '<tr>' +
           '<td><span class="mod-nom">' + modEchapper(o.character_name || '—') + '</span>' +
           '<span class="mod-sous">' + modEchapper(o.steam_name || o.discordName || '') + '</span></td>' +
-          '<td class="num">' + modEchapper(o.unique_id || '—') + '</td>' +
+          '<td class="num">' + modEchapper(o.uid || o.unique_id || '—') + '</td>' +
           '<td class="num">' + modEchapper(o.last_seen_label || '—') + '</td>' +
           '<td><div class="mod-actes"><button type="button" class="mod-acte" data-fiche="horsligne" ' +
           'data-cle="' + modEchapper(o.character_id) + '">Fiche</button></div></td></tr>';
@@ -684,6 +684,8 @@
       corps.minutes = minutes;
       corps.reason = String(motifBan).trim();
       confirmation = 'Bannir ' + (j.characterName || j.name) + ' pendant ' + minutes + ' minute(s) ?';
+    } else if (acte === 'kill') {
+      confirmation = 'Tuer ' + (j.characterName || j.name) + ' en jeu ? Le personnage passe par la mort normale du serveur (coma).';
     } else if (acte === 'freeze') {
       confirmation = 'Basculer le gel de ' + (j.characterName || j.name) + ' ? (c\'est une bascule : geler / degeler)';
     }
@@ -693,7 +695,8 @@
     MOD.enCours[id] = true;
     modRendre();
 
-    var chemins = { message: '/api/fivem/message', kick: '/api/fivem/kick', ban: '/api/fivem/ban', freeze: '/api/fivem/freeze' };
+    var chemins = { message: '/api/fivem/message', kick: '/api/fivem/kick', ban: '/api/fivem/ban',
+      freeze: '/api/fivem/freeze', kill: '/api/fivem/kill' };
     modApiSure(chemins[acte], corps).then(function (r) {
       if (r && r.ok) {
         if (acte === 'freeze') {

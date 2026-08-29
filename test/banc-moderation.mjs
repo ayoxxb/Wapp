@@ -85,7 +85,8 @@ const releve = (extra) => `
     tuiles: (document.getElementById('mod-tuiles')||{}).textContent || '',
     avis: (document.querySelector('#wfa-mod .mod-avis')||{}).textContent || '',
     entreeBarre: vis(document.querySelector('.wfa-mod-ouvrir')),
-    focusRecherche: document.activeElement === document.getElementById('mod-rech')
+    focusRecherche: document.activeElement === document.getElementById('mod-rech'),
+    kill: !!document.querySelector('#wfa-mod [data-acte=kill]')
     ${extra || ''}
   };
   var p = document.createElement('pre'); p.id='r'; p.textContent = JSON.stringify(o); document.body.appendChild(p);`;
@@ -104,7 +105,8 @@ r = rendre('normal', `document.querySelector('.wfa-mod-ouvrir').click();
   setTimeout(function(){ ${releve()} }, 400);`);
 r.panneauVisible ? ok('ouverture par la barre') : ko('le panneau ne s ouvre pas');
 r.lignes === 2 ? ok('2 joueurs listes') : ko('lignes = ' + r.lignes);
-r.boutons === 10 ? ok('5 boutons par joueur (fiche + 4 actions)') : ko('boutons = ' + r.boutons);
+r.boutons === 12 ? ok('6 boutons par joueur (fiche + 5 actions)') : ko('boutons = ' + r.boutons);
+r.kill ? ok('bouton Kill present') : ko('bouton Kill absent');
 /En ligne/.test(r.tuiles) && /staff en jeu/.test(r.tuiles) ? ok('tuiles etat serveur / staff') : ko('tuiles : ' + r.tuiles);
 
 // 3. Ctrl+K ouvre ET donne le focus a la recherche.
@@ -130,6 +132,15 @@ r = rendre('refuse', `document.querySelector('.wfa-mod-ouvrir').click();
   setTimeout(function(){ ${releve()} }, 500);`);
 /permission/i.test(r.avis) ? ok('403 : message de permission') : ko('avis : ' + r.avis);
 r.lignes === 0 ? ok('403 : aucune ligne') : ko('403 mais ' + r.lignes + ' lignes');
+
+// 6bis. La premiere colonne porte l'IDUnique-perso, pas l'ID de session
+// FiveM (volatile : il change a chaque reconnexion). L'ID de session doit
+// rester en interne pour les actions, mais ne plus s'afficher.
+r = rendre('normal', `document.querySelector('.wfa-mod-ouvrir').click();
+  setTimeout(function(){ ${releve(`, premiereCol: (document.querySelector('#wfa-mod tbody tr td')||{}).textContent || '',
+    idInterne: !!document.querySelector('#wfa-mod [data-acte=kick][data-id="12"]')`)} }, 400);`);
+r.premiereCol === '1234-1' ? ok('1re colonne = IDUnique-perso') : ko('1re colonne : ' + r.premiereCol);
+r.idInterne ? ok('ID de session conserve pour les actions') : ko('data-id perdu');
 
 // 7. Recherche : un compte HORS LIGNE remonte des 2 caracteres.
 r = rendre('normal', `document.querySelector('.wfa-mod-ouvrir').click();
