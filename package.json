@@ -1,6 +1,6 @@
 {
   "name": "worldfa-admin-app",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "Espace admin World:FA en application de bureau - coquille Tauri sur worldfa.fr",
   "scripts": {
