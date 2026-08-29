@@ -19,10 +19,40 @@ function rendre(scenario, script) {
       if (window.__SCENARIO === 'refuse' && u.indexOf('/api/') !== -1) {
         return Promise.resolve({ status: 403, json: function () { return Promise.resolve({}); } });
       }
+      if (u.indexOf('/api/fivem-players-offline') !== -1) {
+        return Promise.resolve({ status: 200, ok: true, json: function () { return Promise.resolve({ ok: true, players: [
+          { unique_id: '5555', character_id: 77, character_name: 'Hugo Sorensen', uid: '5555-77', last_seen_label: '12/08/2026 21:04', steam_name: 'hugo' }
+        ] }); } });
+      }
       if (u.indexOf('/api/fivem-players') !== -1) {
         return Promise.resolve({ status: 200, json: function () {
           return Promise.resolve({ online: true, players: ${JSON.stringify(JOUEURS)} });
         } });
+      }
+      if (u.indexOf('/api/fivem-player-info') !== -1) {
+        return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ info: {
+          name: 'Raoul Oshimen', uid: '1234', faction: 'PF', playtime: '12 h', stars: '40',
+          health: 187, armour: 55, phone: '12345', radio: 'Éteinte', frozen: false, discordId: '312910627507011584'
+        } }); } });
+      }
+      if (u.indexOf('/api/fivem-offline-player') !== -1) {
+        return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ ok: true,
+          account: { unique_id: '5555', discord_id: '999', stars: 12 },
+          characters: [{ id: 77, firstname: 'Hugo', lastname: 'Sorensen', faction_name: 'Aucune', last_played_label: '12/08/2026' }]
+        }); } });
+      }
+      if (u.indexOf('/api/fivem-sanctions') !== -1) {
+        return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ ok: true, sanctions: [
+          { id: 1, kind: 'kick', reason: 'AFK', minutes: null, atLabel: '20/08 18:00', by: 'staffA' }
+        ] }); } });
+      }
+      if (u.indexOf('/api/admin/reports') !== -1) {
+        return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({ reports: [
+          { id: 1, clotureeLe: null }, { id: 2, clotureeLe: 123 }, { id: 3, clotureeLe: null }
+        ] }); } });
+      }
+      if (u.indexOf('/ticket/api/dashboard') !== -1) {
+        return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({ stats: { openTickets: 4 } }); } });
       }
       return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ ok: true }); } });
     };
@@ -74,7 +104,7 @@ r = rendre('normal', `document.querySelector('.wfa-mod-ouvrir').click();
   setTimeout(function(){ ${releve()} }, 400);`);
 r.panneauVisible ? ok('ouverture par la barre') : ko('le panneau ne s ouvre pas');
 r.lignes === 2 ? ok('2 joueurs listes') : ko('lignes = ' + r.lignes);
-r.boutons === 8 ? ok('4 actions par joueur') : ko('boutons = ' + r.boutons);
+r.boutons === 10 ? ok('5 boutons par joueur (fiche + 4 actions)') : ko('boutons = ' + r.boutons);
 /En ligne/.test(r.tuiles) && /staff en jeu/.test(r.tuiles) ? ok('tuiles etat serveur / staff') : ko('tuiles : ' + r.tuiles);
 
 // 3. Ctrl+K ouvre ET donne le focus a la recherche.
@@ -100,6 +130,27 @@ r = rendre('refuse', `document.querySelector('.wfa-mod-ouvrir').click();
   setTimeout(function(){ ${releve()} }, 500);`);
 /permission/i.test(r.avis) ? ok('403 : message de permission') : ko('avis : ' + r.avis);
 r.lignes === 0 ? ok('403 : aucune ligne') : ko('403 mais ' + r.lignes + ' lignes');
+
+// 7. Recherche : un compte HORS LIGNE remonte des 2 caracteres.
+r = rendre('normal', `document.querySelector('.wfa-mod-ouvrir').click();
+  setTimeout(function(){ var i=document.getElementById('mod-rech'); i.value='sorensen';
+    i.dispatchEvent(new Event('input'));
+    setTimeout(function(){ ${releve(", horsLigne: document.querySelectorAll('#wfa-mod [data-fiche=horsligne]').length")} }, 500); }, 400);`);
+r.horsLigne === 1 ? ok('recherche : compte hors ligne trouve') : ko('hors ligne -> ' + r.horsLigne);
+
+// 8. Fiche d'un joueur en jeu : la vie BRUTE (187) doit s'afficher en 87.
+r = rendre('normal', `document.querySelector('.wfa-mod-ouvrir').click();
+  setTimeout(function(){ document.querySelector('[data-fiche=enligne]').click();
+    setTimeout(function(){ ${releve(", fiche: (document.querySelector('#wfa-mod .mod-fiche')||{}).textContent || ''")} }, 600); }, 400);`);
+/Raoul Oshimen/.test(r.fiche) ? ok('fiche en jeu : ouverte') : ko('fiche : ' + String(r.fiche).slice(0,80));
+/87 \/ 100/.test(r.fiche) ? ok('vie brute 187 rendue en 87/100') : ko('vie mal convertie : ' + String(r.fiche).slice(0,120));
+/AFK/.test(r.fiche) ? ok('casier affiche dans la fiche') : ko('sanctions absentes de la fiche');
+
+// 9. Tuiles de contexte : reports en attente comptes, tickets ouverts.
+r = rendre('normal', `document.querySelector('.wfa-mod-ouvrir').click();
+  setTimeout(function(){ ${releve()} }, 700);`);
+/2\s*reports en attente/i.test(r.tuiles.replace(/\s+/g,' ')) ? ok('tuile reports (2 non clotures)') : ko('tuiles : ' + r.tuiles);
+/4\s*tickets ouverts/i.test(r.tuiles.replace(/\s+/g,' ')) ? ok('tuile tickets') : ko('tuiles : ' + r.tuiles);
 
 console.log(echecs ? '\n' + echecs + ' echec(s).' : '\nPanneau de moderation : tout passe.');
 process.exit(echecs ? 1 : 0);

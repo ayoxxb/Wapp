@@ -188,7 +188,12 @@
     filtre: '',
     erreur: '',
     enCours: {},
-    sessionReveillee: false
+    sessionReveillee: false,
+    horsLigne: [],
+    horsLigneAt: 0,
+    horsLigneEnVol: null,
+    fiche: null,
+    tuilesSite: null
   };
   var MOD_PERIODE = 6000;
 
@@ -211,6 +216,32 @@
         throw err3;
       }
       return r.json().catch(function () { return {}; });
+    });
+  }
+
+  // Les deux tuiles de contexte ne vivent pas sous /fivem : les reports sont
+  // servis par worldfa lui-meme et les tickets par Support-World monte sur
+  // /ticket. Chacune a SA permission — un 403 masque la tuile au lieu de
+  // remplir l'ecran d'erreurs pour un staff qui n'a que « fivem ».
+  function modApiBrut(chemin) {
+    return fetch(chemin, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+  }
+
+  function modChargerContexte() {
+    return Promise.all([
+      // Un report est EN ATTENTE tant qu'il n'est pas cloture (clotureeLe).
+      modApiBrut('/api/admin/reports?limit=200').then(function (d) {
+        if (!d || !d.reports) return null;
+        return d.reports.filter(function (r) { return !r.clotureeLe; }).length;
+      }),
+      modApiBrut('/ticket/api/dashboard').then(function (d) {
+        return d && d.stats && typeof d.stats.openTickets === 'number' ? d.stats.openTickets : null;
+      })
+    ]).then(function (v) {
+      MOD.tuilesSite = { reports: v[0], tickets: v[1] };
+      modRendre();
     });
   }
 
@@ -294,6 +325,18 @@
       '#wfa-mod .mod-acte.danger { color: rgba(220,100,100,0.8); border-color: rgba(220,100,100,0.28); }',
       '#wfa-mod .mod-acte.danger:hover:not(:disabled) { background: rgba(200,60,60,0.14); color: rgba(220,100,100,1); }',
       '#wfa-mod .mod-vide { padding: 40px; text-align: center; color: rgba(255,255,255,0.25); font-size: 12.5px; }',
+      '#wfa-mod .mod-titre-sec { margin: 22px 0 4px; padding-bottom: 5px;',
+      '  border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 8.5px; font-weight: 700;',
+      '  letter-spacing: 1.6px; text-transform: uppercase; color: rgba(255,255,255,0.25); }',
+      '#wfa-mod .mod-fiche { padding-top: 16px; }',
+      '#wfa-mod .mod-fiche h3 { margin: 16px 0 12px; font-size: 16px; font-weight: 700;',
+      '  color: rgba(255,255,255,0.9); }',
+      '#wfa-mod .mod-infos { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));',
+      '  gap: 10px; margin-bottom: 16px; }',
+      '#wfa-mod .mod-info { border: 1px solid rgba(255,255,255,0.07); padding: 9px 12px; }',
+      '#wfa-mod .mod-info i { font-style: normal; display: block; font-size: 8.5px; letter-spacing: 1.3px;',
+      '  text-transform: uppercase; color: rgba(255,255,255,0.26); margin-bottom: 3px; }',
+      '#wfa-mod .mod-info b { font-weight: 600; color: rgba(255,255,255,0.85); font-size: 12.5px; }',
       '#wfa-mod .mod-pied { flex: none; padding: 8px 20px; border-top: 1px solid rgba(255,255,255,0.06);',
       '  font-size: 10.5px; color: rgba(255,255,255,0.25); }'
     ].join('\n');
@@ -317,19 +360,179 @@
 
     document.getElementById('mod-fermer').addEventListener('click', function () { modBasculer(false); });
     var rech = document.getElementById('mod-rech');
-    rech.addEventListener('input', function () { MOD.filtre = rech.value.trim().toLowerCase(); modRendre(); });
+    rech.addEventListener('input', function () {
+      MOD.filtre = rech.value.trim().toLowerCase();
+      // Chercher sort forcement de la fiche : sinon on tape sans rien voir.
+      MOD.fiche = null;
+      modRendre();
+      if (MOD.filtre.length >= 2) modChargerHorsLigne().then(modRendre);
+    });
     // Les touches du panneau ne doivent pas remonter a la page dessous.
     rech.addEventListener('keydown', function (e) { e.stopPropagation(); });
     return v;
   }
 
+  // La recherche porte sur les joueurs EN JEU **et** sur les comptes
+  // hors-ligne (28/08/2026, 2e passe : elle ne filtrait que les connectes).
+  // La liste hors-ligne est complete et sans filtre cote serveur : on ne la
+  // charge donc qu'a la PREMIERE recherche de 2 caracteres, et on la garde
+  // 5 minutes — la retelecharger a chaque frappe serait absurde.
+  function modChargerHorsLigne() {
+    if (MOD.horsLigneAt && (Date.now() - MOD.horsLigneAt) < 300000) return Promise.resolve();
+    if (MOD.horsLigneEnVol) return MOD.horsLigneEnVol;
+    MOD.horsLigneEnVol = modApiSure('/api/fivem-players-offline').then(function (d) {
+      MOD.horsLigne = (d && d.players) || [];
+      MOD.horsLigneAt = Date.now();
+    }).catch(function () {
+      // Un echec ne doit pas vider ce qu'on avait : la recherche continue sur
+      // les connectes, et la prochaine frappe reessaiera.
+      MOD.horsLigne = MOD.horsLigne || [];
+    }).then(function () { MOD.horsLigneEnVol = null; });
+    return MOD.horsLigneEnVol;
+  }
+
+  function modCorrespond(champs, f) {
+    for (var i = 0; i < champs.length; i += 1) {
+      if (champs[i] && String(champs[i]).toLowerCase().indexOf(f) !== -1) return true;
+    }
+    return false;
+  }
+
   function modVisible() {
     var f = MOD.filtre;
-    if (!f) return MOD.joueurs;
-    return MOD.joueurs.filter(function (j) {
-      return [j.name, j.characterName, j.uid, j.discordName, j.discordId, String(j.id)]
-        .some(function (c) { return c && String(c).toLowerCase().indexOf(f) !== -1; });
+    var enligne = !f ? MOD.joueurs : MOD.joueurs.filter(function (j) {
+      return modCorrespond([j.name, j.characterName, j.uid, j.discordName, j.discordId, j.id], f);
     });
+    // Les comptes hors-ligne n'apparaissent qu'a partir de 2 caracteres :
+    // en dessous, la liste entiere defilerait pour rien.
+    var horsligne = [];
+    if (f && f.length >= 2) {
+      var enJeu = {};
+      for (var i = 0; i < MOD.joueurs.length; i += 1) {
+        if (MOD.joueurs[i].uid) enJeu[MOD.joueurs[i].uid] = true;
+      }
+      horsligne = (MOD.horsLigne || []).filter(function (p) {
+        // Un compte deja en jeu ne doit pas apparaitre deux fois.
+        if (p.uid && enJeu[p.uid]) return false;
+        return modCorrespond([p.character_name, p.steam_name, p.discordName, p.discord_id, p.unique_id, p.uid], f);
+      }).slice(0, 40);
+    }
+    return { enligne: enligne, horsligne: horsligne };
+  }
+
+  // L'IDUnique SEUL : le champ `uid` d'un joueur vaut « IDUnique-IDPersonnage »,
+  // alors que /api/fivem-sanctions n'accepte qu'un nombre (\d{1,10}). Passer
+  // l'uid entier faisait rendre un casier VIDE, sans le moindre message.
+  function modIdUnique(uid) {
+    var s = String(uid || '').split('-')[0];
+    return /^\d{1,10}$/.test(s) ? s : '';
+  }
+
+  function modOuvrirFiche(source, cle) {
+    MOD.fiche = { chargement: true, source: source };
+    modRendre();
+
+    var chemin = source === 'enligne'
+      ? '/api/fivem-player-info?playerId=' + encodeURIComponent(cle)
+      : '/api/fivem-offline-player?charId=' + encodeURIComponent(cle);
+
+    modApiSure(chemin).then(function (d) {
+      MOD.fiche = { source: source, donnees: d, cle: cle };
+      modRendre();
+      // Le casier est demande a part : il vient d'une autre table et ne doit
+      // pas retarder l'affichage de la fiche.
+      var idu = source === 'enligne'
+        ? modIdUnique(d && d.info && d.info.uid)
+        : modIdUnique(d && d.account && d.account.unique_id);
+      if (!idu) return;
+      return modApiSure('/api/fivem-sanctions?uid=' + encodeURIComponent(idu)).then(function (s) {
+        if (MOD.fiche && MOD.fiche.cle === cle) {
+          MOD.fiche.sanctions = (s && s.sanctions) || [];
+          modRendre();
+        }
+      }).catch(function () {});
+    }).catch(function (e) {
+      MOD.fiche = { source: source, erreur: e && e.droit ? 'Permission insuffisante.' : 'Fiche illisible.' };
+      modRendre();
+    });
+  }
+
+  function modLigneInfo(cle, valeur) {
+    return '<div class="mod-info"><i>' + modEchapper(cle) + '</i><b>' + modEchapper(valeur) + '</b></div>';
+  }
+
+  function modRendreFiche() {
+    var f = MOD.fiche;
+    var html = '<div class="mod-fiche"><button type="button" class="mod-acte" id="mod-retour">&larr; Retour a la liste</button>';
+    if (f.chargement) return html + '<div class="mod-vide">Lecture de la fiche…</div></div>';
+    if (f.erreur) return html + '<div class="mod-avis">' + modEchapper(f.erreur) + '</div></div>';
+
+    var d = f.donnees || {};
+    if (f.source === 'enligne') {
+      var i = d.info;
+      if (!i) {
+        // 200 avec info:null couvre TOUT : joueur parti, sans personnage,
+        // pont muet. On ne peut pas distinguer — autant le dire.
+        return html + '<div class="mod-avis">Aucune information : le joueur vient peut-etre de se deconnecter, ou le serveur de jeu ne repond pas.</div></div>';
+      }
+      html += '<h3>' + modEchapper(i.name) + '</h3><div class="mod-infos">';
+      html += modLigneInfo('IDUnique', i.uid || '—');
+      html += modLigneInfo('Faction', i.faction);
+      html += modLigneInfo('Temps de jeu', i.playtime);
+      html += modLigneInfo('Etoiles', i.stars);
+      // La vie arrive BRUTE de 100 a 200 (100 = mort) : l'afficher telle
+      // quelle annoncerait « 187 % de vie ».
+      if (typeof i.health === 'number') html += modLigneInfo('Vie', Math.max(0, i.health - 100) + ' / 100');
+      if (typeof i.armour === 'number') html += modLigneInfo('Armure', i.armour + ' / 100');
+      html += modLigneInfo('Telephone', i.phone);
+      html += modLigneInfo('Radio', i.radio);
+      html += modLigneInfo('Gele', i.frozen ? 'oui' : 'non');
+      // discordId peut valoir litteralement « Inconnu » cote jeu.
+      html += modLigneInfo('Discord', /^\d{17,20}$/.test(String(i.discordId)) ? i.discordId : 'inconnu');
+      html += '</div>';
+      if (i.combat) {
+        html += '<div class="mod-infos">' +
+          modLigneInfo('Kills', i.combat.kills) + modLigneInfo('Morts', i.combat.deaths) +
+          modLigneInfo('Precision', (i.combat.accuracy === null ? '—' : i.combat.accuracy + ' %')) +
+          modLigneInfo('Arme favorite', i.combat.weapon || '—') + '</div>';
+      }
+    } else {
+      var c = d.account || {};
+      var perso = (d.characters || [])[0] || {};
+      html += '<h3>' + modEchapper(((perso.firstname || '') + ' ' + (perso.lastname || '')).trim() || 'Compte hors ligne') + '</h3>';
+      html += '<div class="mod-infos">';
+      html += modLigneInfo('IDUnique', c.unique_id || '—');
+      html += modLigneInfo('Etoiles', c.stars === undefined ? '—' : c.stars);
+      html += modLigneInfo('Faction', perso.faction_name || 'Aucune');
+      html += modLigneInfo('Vu la derniere fois', perso.last_played_label || '—');
+      html += modLigneInfo('Discord', c.discord_id || 'inconnu');
+      html += modLigneInfo('Personnages', (d.characters || []).length);
+      html += '</div>';
+      if (d.ban && d.ban.reason) {
+        html += '<div class="mod-avis">Banni : ' + modEchapper(d.ban.reason) +
+          ' — par ' + modEchapper(d.ban.banned_by || '?') +
+          ' le ' + modEchapper(d.ban.banned_at_label || '?') +
+          (d.ban.expires_at_label ? ', jusqu au ' + modEchapper(d.ban.expires_at_label) : '') + '</div>';
+      }
+    }
+
+    if (f.sanctions === undefined) {
+      html += '<div class="mod-vide">Lecture du casier…</div>';
+    } else if (!f.sanctions.length) {
+      html += '<div class="mod-vide">Aucune sanction enregistree.</div>';
+    } else {
+      html += '<table><thead><tr><th style="width:110px">Quand</th><th style="width:90px">Type</th>' +
+        '<th>Motif</th><th style="width:150px">Par</th></tr></thead><tbody>';
+      for (var k = 0; k < f.sanctions.length && k < 40; k += 1) {
+        var s = f.sanctions[k];
+        html += '<tr><td class="num">' + modEchapper(s.atLabel || s.at || '—') + '</td>' +
+          '<td>' + modEchapper(s.kind) + '</td>' +
+          '<td>' + modEchapper(s.reason || '—') + (s.minutes ? ' (' + s.minutes + ' min)' : '') + '</td>' +
+          '<td>' + modEchapper(s.by || s.staff || '—') + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+    return html + '</div>';
   }
 
   var MOD_ETATS = {
@@ -347,13 +550,27 @@
     tuiles.innerHTML =
       '<div class="mod-tuile ' + (MOD.enligne ? 'ok' : 'hs') + '"><b>' + (MOD.enligne ? 'En ligne' : 'Hors ligne') + '</b><i>serveur</i></div>' +
       '<div class="mod-tuile"><b>' + MOD.joueurs.length + '</b><i>joueurs</i></div>' +
-      '<div class="mod-tuile"><b>' + staff + '</b><i>staff en jeu</i></div>';
+      '<div class="mod-tuile"><b>' + staff + '</b><i>staff en jeu</i></div>' +
+      // Masquees tant qu'on n'a pas de chiffre : null = permission absente ou
+      // route muette, et une tuile a « — » ferait croire a zero.
+      (MOD.tuilesSite && MOD.tuilesSite.reports !== null && MOD.tuilesSite.reports !== undefined
+        ? '<div class="mod-tuile' + (MOD.tuilesSite.reports ? ' hs' : '') + '"><b>' + MOD.tuilesSite.reports + '</b><i>reports en attente</i></div>' : '') +
+      (MOD.tuilesSite && MOD.tuilesSite.tickets !== null && MOD.tuilesSite.tickets !== undefined
+        ? '<div class="mod-tuile"><b>' + MOD.tuilesSite.tickets + '</b><i>tickets ouverts</i></div>' : '');
 
-    var liste = modVisible();
+    if (MOD.fiche) {
+      corps.innerHTML = modRendreFiche();
+      var retour = document.getElementById('mod-retour');
+      if (retour) retour.addEventListener('click', function () { MOD.fiche = null; modRendre(); });
+      return;
+    }
+
+    var vues = modVisible();
+    var liste = vues.enligne;
     var html = '';
     if (MOD.erreur) html += '<div class="mod-avis">' + modEchapper(MOD.erreur) + '</div>';
 
-    if (!liste.length) {
+    if (!liste.length && !vues.horsligne.length) {
       html += '<div class="mod-vide">' +
         (MOD.joueurs.length ? 'Aucun joueur ne correspond a cette recherche.'
           : (MOD.enligne ? 'Personne en jeu.' : 'Serveur de jeu injoignable.')) + '</div>';
@@ -361,7 +578,7 @@
       html += '<table><thead><tr>' +
         '<th style="width:52px">ID</th><th>Joueur</th><th style="width:120px">IDUnique</th>' +
         '<th style="width:64px">Ping</th><th style="width:64px">FPS</th><th style="width:96px">Etat</th>' +
-        '<th style="width:250px"></th></tr></thead><tbody>';
+        '<th style="width:310px"></th></tr></thead><tbody>';
       for (var i = 0; i < liste.length; i += 1) {
         var j = liste[i];
         var occupe = MOD.enCours[j.id] ? ' disabled' : '';
@@ -377,11 +594,29 @@
           '<td class="num">' + (j.fps === null || j.fps === undefined ? '—' : modEchapper(j.fps)) + '</td>' +
           '<td>' + modEchapper(MOD_ETATS[j.status] || '—') + '</td>' +
           '<td><div class="mod-actes">' +
+            '<button type="button" class="mod-acte" data-fiche="enligne" data-cle="' + modEchapper(j.id) + '">Fiche</button>' +
             '<button type="button" class="mod-acte" data-acte="message" data-id="' + modEchapper(j.id) + '"' + occupe + '>Message</button>' +
             '<button type="button" class="mod-acte" data-acte="freeze" data-id="' + modEchapper(j.id) + '"' + occupe + '>Gel</button>' +
             '<button type="button" class="mod-acte danger" data-acte="kick" data-id="' + modEchapper(j.id) + '"' + occupe + '>Kick</button>' +
             '<button type="button" class="mod-acte danger" data-acte="ban" data-id="' + modEchapper(j.id) + '"' + occupe + '>Ban</button>' +
           '</div></td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+
+    if (vues.horsligne.length) {
+      html += '<div class="mod-titre-sec">Comptes hors ligne</div>';
+      html += '<table><thead><tr><th>Personnage</th><th style="width:120px">IDUnique</th>' +
+        '<th style="width:170px">Vu la derniere fois</th><th style="width:110px"></th></tr></thead><tbody>';
+      for (var h = 0; h < vues.horsligne.length; h += 1) {
+        var o = vues.horsligne[h];
+        html += '<tr>' +
+          '<td><span class="mod-nom">' + modEchapper(o.character_name || '—') + '</span>' +
+          '<span class="mod-sous">' + modEchapper(o.steam_name || o.discordName || '') + '</span></td>' +
+          '<td class="num">' + modEchapper(o.unique_id || '—') + '</td>' +
+          '<td class="num">' + modEchapper(o.last_seen_label || '—') + '</td>' +
+          '<td><div class="mod-actes"><button type="button" class="mod-acte" data-fiche="horsligne" ' +
+          'data-cle="' + modEchapper(o.character_id) + '">Fiche</button></div></td></tr>';
       }
       html += '</tbody></table>';
     }
@@ -489,13 +724,15 @@
       modCharger();
       // Rien ne tourne quand le panneau est ferme.
       if (!MOD.minuteur) MOD.minuteur = setInterval(modCharger, MOD_PERIODE);
+      modChargerContexte();
+      if (!MOD.minuteurContexte) MOD.minuteurContexte = setInterval(modChargerContexte, 30000);
       if (surRecherche) {
         var r = document.getElementById('mod-rech');
         if (r) { r.focus(); r.select(); }
       }
-    } else if (MOD.minuteur) {
-      clearInterval(MOD.minuteur);
-      MOD.minuteur = null;
+    } else {
+      if (MOD.minuteur) { clearInterval(MOD.minuteur); MOD.minuteur = null; }
+      if (MOD.minuteurContexte) { clearInterval(MOD.minuteurContexte); MOD.minuteurContexte = null; }
     }
   }
 
@@ -506,7 +743,12 @@
     // un ecouteur par bouton fuirait a chaque passage.
     v.addEventListener('click', function (e) {
       var b = e.target && e.target.closest ? e.target.closest('.mod-acte') : null;
-      if (b && !b.disabled) modAgir(b.getAttribute('data-acte'), b.getAttribute('data-id'));
+      if (!b || b.disabled) return;
+      if (b.getAttribute('data-fiche')) {
+        modOuvrirFiche(b.getAttribute('data-fiche'), b.getAttribute('data-cle'));
+        return;
+      }
+      if (b.getAttribute('data-acte')) modAgir(b.getAttribute('data-acte'), b.getAttribute('data-id'));
     });
 
     // Ctrl+K ouvre sur la recherche, Echap ferme. Le raccourci est pose sur
