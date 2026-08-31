@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Hors ligne</title>
+<style>
+  /* Meme langage que l espace admin : gris tres sombres, accent rouge, aucun
+     arrondi. La barre de titre, elle, est posee par injection.js — ce fichier
+     ne la redessine pas, sans quoi il y en aurait deux. */
+  html, body { margin: 0; background: #0c0c0d;
+    font-family: "Segoe UI", Arial, sans-serif; color: rgba(255,255,255,0.85); }
+  /* La barre de titre injectee DECALE le corps de sa hauteur sans rien retirer
+     a 100vh : une page calee sur 100vh finirait 34 px trop bas, avec une barre
+     de defilement pour rien. `--wfa-app-haut` est publiee par l injection ;
+     hors application, la variable n existe pas et le repli vaut 0. */
+  .centre { min-height: calc(100vh - var(--wfa-app-haut, 0px));
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; padding: 0 32px; box-sizing: border-box; }
+  h1 { margin: 0 0 10px; font-size: 17px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; }
+  h1 span { color: rgba(220,100,100,0.95); }
+  p { margin: 0 0 6px; font-size: 13px; color: rgba(255,255,255,0.5); max-width: 460px; line-height: 1.6; }
+  .adresse { font-size: 11px; color: rgba(255,255,255,0.3); letter-spacing: 1px; }
+  button { margin-top: 22px; padding: 11px 26px; font-family: inherit; font-size: 12px;
+    font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; cursor: pointer;
+    color: rgba(255,255,255,0.9); background: rgba(200,60,60,0.14);
+    border: 1px solid rgba(220,100,100,0.45); }
+  button:hover:not(:disabled) { background: rgba(200,60,60,0.26); }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  .avis { margin-top: 14px; min-height: 18px; font-size: 12px; color: rgba(220,120,120,0.9); }
+</style>
+</head>
+<body>
+  <div class="centre">
+    <h1>World<span>:FA</span> — hors ligne</h1>
+    <p>Le site ne repond pas. L'espace admin vit entierement sur worldfa.fr :
+       tant qu'il est injoignable, l'application n'a rien a afficher.</p>
+    <p class="adresse">https://worldfa.fr/admin</p>
+    <button type="button" id="reessayer">Réessayer</button>
+    <div class="avis" id="avis"></div>
+  </div>
+  <script>
+    // Aucun rechargement de CETTE page : c'est le cote Rust qui refait le test
+    // et qui envoie la fenetre sur le site des qu'il repond. Recharger ici ne
+    // ferait que reafficher le meme ecran.
+    var bouton = document.getElementById('reessayer');
+    var avis = document.getElementById('avis');
+    var essais = 0;
+
+    // L'IPC peut manquer (capacite mal reglee, page ouverte hors application) :
+    // le bouton doit le dire, pas lever une exception dans le vide.
+    function invoquer() {
+      try {
+        if (window.__TAURI__ && window.__TAURI__.core) {
+          return window.__TAURI__.core.invoke('rejoindre_le_site');
+        }
+      } catch (e) {}
+      return Promise.reject(new Error('ipc indisponible'));
+    }
+
+    function essayer() {
+      bouton.disabled = true;
+      avis.textContent = 'Connexion…';
+      essais += 1;
+      invoquer().then(function (joignable) {
+        if (joignable) return;              // la fenetre part sur le site
+        bouton.disabled = false;
+        avis.textContent = 'Toujours injoignable (essai ' + essais + ').';
+      }).catch(function () {
+        bouton.disabled = false;
+        avis.textContent = 'Verification impossible.';
+      });
+    }
+
+    bouton.addEventListener('click', essayer);
+    // Une coupure dure rarement : on retente tout seul toutes les 15 s, pour
+    // que l'application reparte sans qu'on ait a la surveiller.
+    setInterval(function () { if (!bouton.disabled) essayer(); }, 15000);
+  </script>
+</body>
+</html>

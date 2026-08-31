@@ -90,9 +90,17 @@ ok('aucun doublon de chemin');
 // correspondance de prefixe naive allumait deux liens — ou le mauvais. La
 // fonction est extraite et REELLEMENT exercee : un simple grep de source
 // n'aurait rien prouve.
-const texteFonction = src.slice(src.indexOf('function cheminLePlusPrecis'));
-const corps = texteFonction.slice(0, texteFonction.indexOf('\n  }') + 4);
-const fabriquer = (pathname) => new Function('location', corps + '; return cheminLePlusPrecis;')({ pathname });
+// Les deux fonctions sont prises ensemble : depuis 0.1.8, le chemin passe par
+// `cheminCourant()` (crochet de banc pour rejouer n'importe quelle page).
+// `window` est fourni vide : sans __WFA_APP_TEST, on retombe sur
+// location.pathname, exactement comme dans l'application.
+const extraire = (nom) => {
+  const t = src.slice(src.indexOf('function ' + nom));
+  return t.slice(0, t.indexOf('\n  }') + 4);
+};
+const corps = extraire('cheminCourant') + '\n' + extraire('cheminLePlusPrecis');
+const fabriquer = (pathname) => new Function('location', 'window',
+  corps + '; return cheminLePlusPrecis;')({ pathname }, {});
 
 for (const [pathname, attendu] of [
   ['/fivem', '/fivem'],
@@ -169,5 +177,38 @@ assert.ok(src.includes('reveillerSession') && src.includes('modApiSure'), 'revei
 // Rien ne tourne panneau ferme.
 assert.ok(src.includes('clearInterval(MOD.minuteur)'), 'sondage arrete a la fermeture');
 ok('tableau de bord de moderation');
+
+// --- Navigation, zoom, veille (0.1.8, 30/08/2026) ---------------------------
+// Le rendu reel (boutons, nom de page, ajustements, zoom) est verifie par
+// test/banc-barre-titre.mjs. Restent ici les deux raccourcis que ce banc ne
+// PEUT pas jouer : F5 et Alt+fleche declenchent une vraie navigation, et sous
+// --virtual-time-budget Chrome sans tete ne rend jamais la main.
+assert.ok(/e\.key === 'F5'/.test(src) && /location\.reload\(\)/.test(src), 'F5 recharge');
+assert.ok(/e\.key === 'r' \|\| e\.key === 'R'/.test(src), 'Ctrl+R recharge aussi');
+assert.ok(/e\.altKey[\s\S]{0,80}ArrowLeft[\s\S]{0,200}history\.back\(\)/.test(src), 'Alt+← revient en arriere');
+assert.ok(/history\.forward\(\)/.test(src), 'Alt+→ avance');
+// Le zoom passe par le WEBVIEW et non par une regle CSS : lui seul
+// redimensionne aussi la barre laterale et le panneau.
+assert.ok(src.includes('setZoom'), 'zoom : par le webview');
+// Un appel Tauri sans la capacite correspondante echoue en silence : la
+// permission est donc verifiee ICI, dans le fichier qui l'accorde.
+const capacite = JSON.parse(readFileSync(
+  new URL('../src-tauri/capabilities/acces-worldfa.json', import.meta.url), 'utf8'));
+assert.ok(capacite.permissions.includes('core:webview:allow-set-webview-zoom'),
+  'zoom : permission accordee a worldfa.fr');
+ok('navigation, zoom');
+
+// --- Ban definitif et levee (0.1.8) ----------------------------------------
+// Le permanent NE PASSE PAS par /api/fivem/ban (qui exige minutes > 0) mais
+// par ban-identity, la seule route capable d'un expires_at NULL.
+assert.ok(src.includes("'/api/fivem/ban-identity'"), 'ban definitif : route ban-identity');
+assert.ok(src.includes("'/api/fivem/unban'"), 'levee : route unban');
+assert.ok(src.includes("'/api/fivem/bans'"), 'liste des bans (seule source de l id d un ban)');
+// L'appartenance d'un ban est tranchee par le SERVEUR (aMoi / leveTousLesBans) :
+// lui seul connait les anciens pseudos du staff.
+assert.ok(src.includes('leveTousLesBans') && src.includes('aMoi'), 'appartenance tranchee par le serveur');
+// Le refus du serveur porte la phrase qui explique : elle doit remonter.
+assert.ok(src.includes('err3.texte') && src.includes('e.texte'), 'message de refus du serveur affiche');
+ok('ban definitif et levee');
 
 console.log('\nBarre laterale : tous les invariants tiennent.');

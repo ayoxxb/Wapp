@@ -4,7 +4,7 @@
   "version": "0.1.7",
   "identifier": "fr.worldfa.admin",
   "build": {
-    "frontendDist": "https://worldfa.fr"
+    "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,

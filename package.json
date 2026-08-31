@@ -5,7 +5,8 @@
   "description": "Espace admin World:FA en application de bureau - coquille Tauri sur worldfa.fr",
   "scripts": {
     "tauri": "tauri",
-    "test": "node test/injection.test.mjs"
+    "test": "node test/injection.test.mjs",
+    "test:navigateur": "node test/banc-moderation.mjs && node test/banc-barre-titre.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

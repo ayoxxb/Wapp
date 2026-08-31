@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "ecran-hors-ligne",
+  "description": "L ecran local affiche quand worldfa.fr ne repond pas : il peut demander une nouvelle tentative de connexion, et deplacer, reduire ou fermer la fenetre (sans barre de titre systeme, il n y a pas d autre moyen). Aucun acces au reseau, aux fichiers ni au shell.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging"
+  ]
+}

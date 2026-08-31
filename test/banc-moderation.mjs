@@ -46,6 +46,15 @@ function rendre(scenario, script, largeur) {
           characters: [{ id: 77, firstname: 'Hugo', lastname: 'Sorensen', faction_name: 'Aucune', last_played_label: '12/08/2026' }]
         }); } });
       }
+      if (u.indexOf('/api/fivem/bans') !== -1) {
+        return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ ok: true,
+          leveTousLesBans: window.__SCENARIO === 'banni-autre' ? false : true,
+          bans: window.__SCENARIO === 'banni' || window.__SCENARIO === 'banni-autre'
+            ? [{ id: 4242, uid: '1234', discord_id: '312910627507011584', reason: 'RDM',
+                 banned_by: window.__SCENARIO === 'banni-autre' ? 'staffB' : 'moi',
+                 aMoi: window.__SCENARIO !== 'banni-autre' }]
+            : [] }); } });
+      }
       if (u.indexOf('/api/fivem-sanctions') !== -1) {
         return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ ok: true, sanctions: [
           { id: 1, kind: 'kick', reason: 'AFK', minutes: null, atLabel: '20/08 18:00', by: 'staffA' }
@@ -96,7 +105,14 @@ const releve = (extra) => `
     poigneeVisible: vis(document.getElementById('wfa-app-poignee')),
     margeBody: getComputedStyle(document.body).marginLeft,
     focusRecherche: document.activeElement === document.getElementById('mod-rech'),
-    kill: !!document.querySelector('#wfa-mod [data-acte=kill]')
+    kill: !!document.querySelector('#wfa-mod [data-acte=kill]'),
+    banDefinitif: !!document.querySelector('#wfa-mod [data-ban=definitif]'),
+    lever: !!document.querySelector('#wfa-mod [data-ban=lever]'),
+    etatBan: (document.querySelector('#wfa-mod .mod-etat-ban')||{}).textContent || '',
+    pastille: (function () {
+      var e = document.querySelector('.wfa-mod-ouvrir .wfa-mod-compte');
+      return e && getComputedStyle(e).display !== 'none' ? e.textContent : '';
+    })()
     ${extra || ''}
   };
   var p = document.createElement('pre'); p.id='r'; p.textContent = JSON.stringify(o); document.body.appendChild(p);`;
@@ -205,6 +221,49 @@ r.poigneeVisible ? ok('poignee ≡ disponible pour la rouvrir') : ko('poignee ab
 r = rendre('normal', releve(), 1400);
 r.barreRepliee === false ? ok('fenetre large : barre deployee') : ko('barre repliee sans raison a 1400 px');
 r.margeBody === '210px' ? ok('la page est decalee de la largeur de la barre') : ko('marge du body : ' + r.margeBody);
+
+// 13. Fiche d'un joueur NON banni : le ban definitif est propose, la levee non.
+// (Le ban definitif passe par ban-identity — /api/fivem/ban refuse le permanent.)
+r = rendre('normal', `document.querySelector('.wfa-mod-ouvrir').click();
+  setTimeout(function(){ document.querySelector('[data-fiche=enligne]').click();
+    setTimeout(function(){ ${releve()} }, 700); }, 400);`);
+r.banDefinitif ? ok('fiche : bouton « Ban définitif »') : ko('bouton de ban definitif absent');
+r.lever === false ? ok('fiche : pas de levee sur un compte non banni') : ko('bouton Lever propose a tort');
+
+// 14. Fiche d'un joueur DEJA banni : la levee remplace le ban, et l'etat est dit.
+r = rendre('banni', `document.querySelector('.wfa-mod-ouvrir').click();
+  setTimeout(function(){ document.querySelector('[data-fiche=enligne]').click();
+    setTimeout(function(){ ${releve()} }, 700); }, 400);`);
+r.lever ? ok('fiche : bouton « Lever le ban »') : ko('bouton Lever absent sur un compte banni');
+r.banDefinitif === false ? ok('fiche : pas de re-ban sur un compte deja banni') : ko('Ban definitif propose sur un banni');
+/Banni/.test(r.etatBan) ? ok('fiche : etat du ban affiche') : ko('etat du ban : ' + r.etatBan);
+
+// 14bis. Ban d'un AUTRE staff, sans la permission « fivem:unban » : le bouton
+// reste la (c'est le serveur qui refuse, avec sa phrase), mais la fiche
+// annonce a qui appartient le ban.
+r = rendre('banni-autre', `document.querySelector('.wfa-mod-ouvrir').click();
+  setTimeout(function(){ document.querySelector('[data-fiche=enligne]').click();
+    setTimeout(function(){ ${releve()} }, 700); }, 400);`);
+/staffB/.test(r.etatBan) ? ok('fiche : auteur du ban nomme') : ko('auteur absent : ' + r.etatBan);
+/ban d un autre staff/.test(r.etatBan) ? ok('fiche : ban d un autre signale') : ko('avertissement absent : ' + r.etatBan);
+
+// 15. Veille, panneau FERME : un report de plus depuis le dernier passage
+// allume la pastille sur l'entree « Moderation ». Le repere est en
+// localStorage — dans la coquille, chaque navigation recharge le script.
+r = rendre('normal', `localStorage.setItem('wfa_mod_vus', JSON.stringify({ reports: 1, tickets: 4 }));
+  setTimeout(function(){ ${releve()} }, 2200);`);
+r.pastille === '1' ? ok('veille : 1 nouveau report signale') : ko('pastille = ' + JSON.stringify(r.pastille));
+
+// 16. Rien de neuf : aucune pastille (sinon elle ne voudrait plus rien dire).
+r = rendre('normal', `localStorage.setItem('wfa_mod_vus', JSON.stringify({ reports: 2, tickets: 4 }));
+  setTimeout(function(){ ${releve()} }, 2200);`);
+r.pastille === '' ? ok('veille : rien de neuf, pas de pastille') : ko('pastille a tort : ' + r.pastille);
+
+// 17. Ouvrir le panneau vaut « vu » : la pastille s'eteint.
+r = rendre('normal', `localStorage.setItem('wfa_mod_vus', JSON.stringify({ reports: 0, tickets: 0 }));
+  setTimeout(function(){ document.querySelector('.wfa-mod-ouvrir').click();
+    setTimeout(function(){ ${releve()} }, 700); }, 800);`);
+r.pastille === '' ? ok('veille : ouverture = tout vu') : ko('pastille encore la : ' + r.pastille);
 
 console.log(echecs ? '\n' + echecs + ' echec(s).' : '\nPanneau de moderation : tout passe.');
 process.exit(echecs ? 1 : 0);

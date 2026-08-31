@@ -53,6 +53,18 @@
     ] }
   ];
 
+  // Chemin de la page courante. Il passe par une fonction pour que le banc
+  // puisse rejouer N'IMPORTE QUELLE page : Chrome sans tete se FIGE sur une
+  // URL http:// avec --virtual-time-budget (piege deja paye), les bancs
+  // rendent donc en file://, ou `location.pathname` est celui du fichier
+  // temporaire — sans ce crochet, ni le lien actif, ni le nom de la page, ni
+  // les ajustements par page ne seraient verifiables autrement que par une
+  // lecture du source, qui ne prouve rien. Le crochet n'existe que sous
+  // __WFA_APP_TEST, deja pose au meme usage plus haut.
+  function cheminCourant() {
+    return (window.__WFA_APP_TEST && window.__WFA_APP_TEST_CHEMIN) || location.pathname;
+  }
+
   // Le chemin le PLUS LONG qui corresponde a la page courante, '' si aucun.
   // Indispensable depuis qu'il y a des chemins emboites : /fivem/stats
   // commence par /fivem, et une simple correspondance de prefixe allumait
@@ -61,7 +73,8 @@
     var gagnant = '';
     for (var i = 0; i < chemins.length; i += 1) {
       var c = chemins[i];
-      var correspond = location.pathname === c || location.pathname.indexOf(c + '/') === 0;
+      var chemin = cheminCourant();
+      var correspond = chemin === c || chemin.indexOf(c + '/') === 0;
       if (correspond && c.length > gagnant.length) gagnant = c;
     }
     return gagnant;
@@ -79,6 +92,57 @@
   }
 
   var HAUTEUR_TITRE = 34;
+
+  // Nom de la page COURANTE, tel qu'il est ecrit dans la barre laterale :
+  // sans barre de navigateur, rien ne disait ou l'on se trouve une fois la
+  // barre repliee, et deux pages d'admin se ressemblent beaucoup.
+  function nomDeLaPage() {
+    if (!SUR_WORLDFA) {
+      if (/(^|\.)discord\.com$/.test(location.hostname)) return 'Connexion Discord';
+      // Page LOCALE de l'application (l'ecran hors ligne) : son titre dit
+      // quelque chose, « tauri.localhost » non.
+      var propre = String(document.title || '').trim();
+      return propre || location.hostname;
+    }
+    var chemins = [];
+    var noms = {};
+    for (var g = 0; g < GROUPES.length; g += 1) {
+      for (var k = 0; k < GROUPES[g].liens.length; k += 1) {
+        chemins.push(GROUPES[g].liens[k].chemin);
+        noms[GROUPES[g].liens[k].chemin] = GROUPES[g].liens[k].nom;
+      }
+    }
+    var actif = cheminLePlusPrecis(chemins);
+    if (actif) return noms[actif];
+    if (cheminCourant() === '/admin' || cheminCourant().indexOf('/admin/') === 0) return 'Espace admin';
+    // Une page hors du hub (wiki public, carte) : son propre titre vaut mieux
+    // qu'un chemin brut, mais il peut etre long.
+    var t = String(document.title || '').trim();
+    return t ? t.slice(0, 48) : cheminCourant();
+  }
+
+  // ZOOM DE LA FENETRE (Ctrl + / Ctrl - / Ctrl 0), retenu d'une page a
+  // l'autre. Les tableaux d'administration sont denses : pouvoir reculer d'un
+  // cran change tout sur un portable. On passe par le zoom du WEBVIEW et non
+  // par une regle CSS : lui seul redimensionne AUSSI la barre laterale et le
+  // panneau, sans quoi l'habillage de l'app resterait a sa taille pendant que
+  // la page retrecit.
+  var CLE_ZOOM = 'wfa_app_zoom';
+  var PALIERS = [0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.4];
+
+  function zoomRetenu() {
+    var z = 1;
+    try { z = parseFloat(localStorage.getItem(CLE_ZOOM)) || 1; } catch (e) {}
+    return PALIERS.indexOf(z) === -1 ? 1 : z;
+  }
+
+  function appliquerZoom(z) {
+    try {
+      if (window.__TAURI__ && window.__TAURI__.webview) {
+        window.__TAURI__.webview.getCurrentWebview().setZoom(z).catch(function () {});
+      }
+    } catch (e) {}
+  }
 
   // La fenetre n'a plus de barre systeme (couleur d'accentuation Windows,
   // bleue chez l'exploitant) : celle-ci la remplace sur TOUTES les pages —
@@ -105,6 +169,28 @@
       '  font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;',
       '  color: rgba(255,255,255,0.45); }',
       '#wfa-titlebar .wfa-tb-titre span { color: rgba(220,100,100,0.95); }',
+      /* Nom de la page courante, a la suite de la marque : letter-spacing
+         normal et casse d origine, sinon « Gestion FiveM » devient illisible
+         au milieu des majuscules espacees. */
+      '#wfa-titlebar .wfa-tb-page { margin-left: 10px; padding-left: 10px;',
+      '  border-left: 1px solid rgba(255,255,255,0.12); font-weight: 600; font-size: 11px;',
+      '  letter-spacing: 0; text-transform: none; color: rgba(255,255,255,0.62);',
+      '  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }',
+      '#wfa-titlebar .wfa-tb-zoom { margin-left: 8px; font-size: 10px; letter-spacing: 0;',
+      '  text-transform: none; color: rgba(255,255,255,0.35); }',
+      /* Precedent / Suivant / Recharger : sans barre de navigateur, ces trois
+         gestes n existaient nulle part. Plus etroits que les boutons de
+         fenetre, et separes d eux par la bande de deplacement. */
+      '#wfa-titlebar .wfa-tb-nav { display: flex; align-items: stretch; }',
+      '#wfa-titlebar .wfa-tb-nav button { width: 34px; font-size: 14px; }',
+      '#wfa-titlebar .wfa-tb-nav button:disabled { color: rgba(255,255,255,0.16); cursor: default;',
+      '  background: transparent; }',
+      /* Fil de chargement : la seule chose qui dise « ca travaille » quand une
+         page d admin met deux secondes a repondre. */
+      '#wfa-charge { position: fixed; top: 0; left: 0; height: 2px; width: 0%;',
+      '  z-index: 2147483001; background: rgba(220,100,100,0.95); opacity: 0;',
+      '  transition: width 0.25s ease-out, opacity 0.25s ease-out; pointer-events: none; }',
+      '#wfa-charge.actif { opacity: 1; }',
       '#wfa-titlebar button { width: 46px; border: 0; background: transparent; cursor: pointer;',
       '  color: rgba(255,255,255,0.5); font-size: 13px; font-family: "Segoe UI Symbol", "Segoe UI", sans-serif; }',
       '#wfa-titlebar button:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.9); }',
@@ -116,10 +202,20 @@
     var barre = document.createElement('div');
     barre.id = 'wfa-titlebar';
 
+    var nav = document.createElement('div');
+    nav.className = 'wfa-tb-nav';
+    barre.appendChild(nav);
+
     var titre = document.createElement('div');
     titre.className = 'wfa-tb-titre';
     titre.setAttribute('data-tauri-drag-region', '');
-    titre.innerHTML = 'Espace Admin — World<span>:FA</span>';
+    // Le nom de la page est dans un noeud a part : la bande de deplacement
+    // doit rester saisissable sur toute sa longueur, texte compris.
+    titre.innerHTML = 'World<span>:FA</span>'
+      + '<span class="wfa-tb-page"></span><span class="wfa-tb-zoom"></span>';
+    var etiquettePage = titre.querySelector('.wfa-tb-page');
+    var etiquetteZoom = titre.querySelector('.wfa-tb-zoom');
+    if (etiquettePage) etiquettePage.textContent = nomDeLaPage();
     barre.appendChild(titre);
 
     function fenetre() {
@@ -145,7 +241,95 @@
     barre.appendChild(boutonFenetre('\u2500', '', function (w) { w.minimize(); }));
     barre.appendChild(boutonFenetre('\u25A1', '', function (w) { w.toggleMaximize(); }));
     barre.appendChild(boutonFenetre('\u2715', 'wfa-fermer', function (w) { w.close(); }));
+
+    // Navigation : de simples appels a l'historique du webview, aucune
+    // permission Tauri en jeu — ils marchent donc aussi sur la page Discord.
+    function boutonNav(texte, titreBouton, action) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = texte;
+      b.title = titreBouton;
+      b.addEventListener('click', function () { try { action(); } catch (e) {} });
+      nav.appendChild(b);
+      return b;
+    }
+    var precedent = boutonNav('\u2190', 'Précédent (Alt+←)', function () { history.back(); });
+    var suivant = boutonNav('\u2192', 'Suivant (Alt+→)', function () { history.forward(); });
+    boutonNav('\u27F3', 'Recharger (F5)', function () { location.reload(); });
+    // `history.length` vaut 1 sur la toute premiere page d'une fenetre : c'est
+    // le seul cas ou l'on sait a coup sur qu'il n'y a nulle part ou revenir.
+    // Au-dela, le webview ne dit pas s'il reste un pas en avant — les fleches
+    // restent donc actives, quitte a ne rien faire.
+    if (history.length <= 1) { precedent.disabled = true; suivant.disabled = true; }
+
     document.body.appendChild(barre);
+
+    // Fil de chargement : visible tant que la page n'a pas fini, et rallume
+    // des qu'une navigation part (le document courant reste a l'ecran pendant
+    // que le serveur reflechit — c'est la que l'attente se voit le plus).
+    var fil = document.createElement('div');
+    fil.id = 'wfa-charge';
+    document.body.appendChild(fil);
+
+    function chargeDemarre() {
+      fil.classList.add('actif');
+      fil.style.width = '15%';
+      // Deux paliers : le fil avance franchement, puis rampe. Il ne peut pas
+      // dire la vraie progression d'une navigation, il dit « ca travaille ».
+      setTimeout(function () { if (fil.classList.contains('actif')) fil.style.width = '70%'; }, 120);
+      setTimeout(function () { if (fil.classList.contains('actif')) fil.style.width = '88%'; }, 1200);
+    }
+    function chargeFinie() {
+      fil.style.width = '100%';
+      fil.classList.remove('actif');
+      setTimeout(function () { fil.style.width = '0%'; }, 300);
+    }
+    if (document.readyState !== 'complete') {
+      chargeDemarre();
+      window.addEventListener('load', chargeFinie);
+    }
+    window.addEventListener('beforeunload', chargeDemarre);
+
+    // Zoom retenu : repose a CHAQUE page, le webview ne le garde pas d'une
+    // navigation a l'autre.
+    var zoom = zoomRetenu();
+    if (zoom !== 1) {
+      appliquerZoom(zoom);
+      if (etiquetteZoom) etiquetteZoom.textContent = Math.round(zoom * 100) + ' %';
+    }
+
+    function changerZoom(sens) {
+      var i = PALIERS.indexOf(zoomRetenu());
+      if (i === -1) i = PALIERS.indexOf(1);
+      var j = sens === 0 ? PALIERS.indexOf(1) : Math.min(PALIERS.length - 1, Math.max(0, i + sens));
+      var z = PALIERS[j];
+      try { localStorage.setItem(CLE_ZOOM, String(z)); } catch (e) {}
+      appliquerZoom(z);
+      if (etiquetteZoom) etiquetteZoom.textContent = z === 1 ? '' : Math.round(z * 100) + ' %';
+    }
+
+    // Les raccourcis d'un navigateur, que la coquille n'avait pas. En
+    // CAPTURE : une page qui ecoute les touches (la recherche du panneau,
+    // un tableau) ne doit pas les avaler.
+    window.addEventListener('keydown', function (e) {
+      if (e.altKey && !e.ctrlKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        if (e.key === 'ArrowLeft') history.back(); else history.forward();
+        return;
+      }
+      if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R'))) {
+        e.preventDefault();
+        location.reload();
+        return;
+      }
+      if (e.ctrlKey || e.metaKey) {
+        // '=' est la meme touche que '+' sans majuscule sur un clavier AZERTY
+        // comme QWERTY ; le pave numerique envoie 'Add'/'Subtract'.
+        if (e.key === '+' || e.key === '=' || e.key === 'Add') { e.preventDefault(); changerZoom(1); }
+        else if (e.key === '-' || e.key === '_' || e.key === 'Subtract') { e.preventDefault(); changerZoom(-1); }
+        else if (e.key === '0') { e.preventDefault(); changerZoom(0); }
+      }
+    }, true);
   }
 
   // MODE ADMIN PUR (26/08/2026, choix de l'exploitant) : dans l'application,
@@ -155,7 +339,7 @@
   // (topbar : logo, Rejoindre, Boutique...) est masque : on y est pour lire un
   // contenu, pas pour retrouver l'habillage grand public.
   var CHEMINS_ADMIN = /^\/(admin|fivem|ticket|forms|achat-boutique|graph|groupe-graph)/;
-  if (SUR_WORLDFA && (location.pathname === '/' || location.pathname === '/index.html')) {
+  if (SUR_WORLDFA && (cheminCourant() === '/' || cheminCourant() === '/index.html')) {
     location.replace('/admin');
     return;
   }
@@ -202,7 +386,17 @@
     horsLigneAt: 0,
     horsLigneEnVol: null,
     fiche: null,
-    tuilesSite: null
+    tuilesSite: null,
+    // Liste des bans (avec leur id, seul moyen d'en lever un) : chargee a
+    // l'ouverture d'une fiche, gardee 60 s. `leveTous` est le droit
+    // « fivem:unban », que le serveur renvoie AVEC la liste.
+    bans: null,
+    bansAt: 0,
+    bansEnVol: null,
+    leveTous: false,
+    // Derniers compteurs vus, pour signaler ce qui vient d'arriver.
+    vus: null,
+    nouveaux: { reports: 0, tickets: 0 }
   };
   var MOD_PERIODE = 6000;
 
@@ -220,9 +414,16 @@
         throw err;
       }
       if (r.status === 403) {
-        var err3 = new Error('droit');
-        err3.droit = true;
-        throw err3;
+        // Le refus du serveur porte souvent une phrase qui explique TOUT
+        // (« ce ban a ete pose par X, tu ne peux lever que les tiens ») :
+        // la jeter pour dire « permission insuffisante » ferait chercher
+        // dans les journaux ce que la reponse disait deja.
+        return r.json().catch(function () { return {}; }).then(function (d) {
+          var err3 = new Error('droit');
+          err3.droit = true;
+          err3.texte = d && d.error ? String(d.error) : '';
+          throw err3;
+        });
       }
       return r.json().catch(function () { return {}; });
     });
@@ -250,8 +451,84 @@
       })
     ]).then(function (v) {
       MOD.tuilesSite = { reports: v[0], tickets: v[1] };
+      modVeille();
       modRendre();
     });
+  }
+
+  // VEILLE : ce qui est ARRIVE depuis le dernier passage dans le panneau
+  // (30/08/2026, demande). Le sondage tourne aussi panneau FERME — les deux
+  // routes concernees ne touchent pas au dashboard FiveM (elles ne marquent
+  // donc personne « actif ») et une pastille sans surveillance ne servirait
+  // a rien.
+  //
+  // Le repere est garde en localStorage et non en memoire : dans cette
+  // coquille chaque navigation recharge la page, donc le script repart de
+  // zero a chaque clic dans la barre.
+  var CLE_VUS = 'wfa_mod_vus';
+  var MOD_VEILLE_PERIODE = 90000;
+
+  function modLireVus() {
+    try { return JSON.parse(localStorage.getItem(CLE_VUS) || 'null'); } catch (e) { return null; }
+  }
+  function modEcrireVus(v) {
+    try { localStorage.setItem(CLE_VUS, JSON.stringify(v)); } catch (e) {}
+  }
+
+  function modEcart(courant, vu) {
+    if (typeof courant !== 'number' || typeof vu !== 'number') return 0;
+    return Math.max(0, courant - vu);
+  }
+
+  function modVeille() {
+    var t = MOD.tuilesSite || {};
+    var vus = MOD.vus || modLireVus();
+
+    // Premier passage : on prend l'etat courant pour repere, sans rien
+    // annoncer — sinon toute premiere ouverture crierait « 12 nouveaux ».
+    if (!vus) {
+      MOD.vus = { reports: t.reports, tickets: t.tickets };
+      modEcrireVus(MOD.vus);
+      return;
+    }
+
+    // Un compteur qui BAISSE (reports traites ailleurs) redescend le repere,
+    // sinon il faudrait remonter au-dessus de l'ancien pic pour etre averti.
+    if (typeof t.reports === 'number' && typeof vus.reports === 'number' && t.reports < vus.reports) vus.reports = t.reports;
+    if (typeof t.tickets === 'number' && typeof vus.tickets === 'number' && t.tickets < vus.tickets) vus.tickets = t.tickets;
+
+    // Panneau ouvert : les chiffres sont sous les yeux, rien a signaler.
+    if (MOD.ouvert) { MOD.vus = vus; modMarquerVu(); return; }
+
+    MOD.vus = vus;
+    modEcrireVus(vus);
+    MOD.nouveaux = { reports: modEcart(t.reports, vus.reports), tickets: modEcart(t.tickets, vus.tickets) };
+    modAfficherVeille();
+  }
+
+  // Ouvrir le panneau vaut « j'ai vu » : le repere se cale sur l'etat courant.
+  function modMarquerVu() {
+    var t = MOD.tuilesSite || {};
+    MOD.vus = { reports: t.reports, tickets: t.tickets };
+    modEcrireVus(MOD.vus);
+    MOD.nouveaux = { reports: 0, tickets: 0 };
+    modAfficherVeille();
+  }
+
+  function modAfficherVeille() {
+    var total = (MOD.nouveaux.reports || 0) + (MOD.nouveaux.tickets || 0);
+    var lien = document.querySelector('#wfa-app-bar .wfa-mod-ouvrir .wfa-mod-compte');
+    if (lien) {
+      lien.textContent = total ? String(total) : '';
+      lien.style.display = total ? 'inline-block' : 'none';
+      lien.title = total
+        ? (MOD.nouveaux.reports ? MOD.nouveaux.reports + ' report(s) ' : '')
+          + (MOD.nouveaux.tickets ? MOD.nouveaux.tickets + ' ticket(s) ' : '') + 'depuis ton dernier passage'
+        : '';
+    }
+    // Barre repliee : la pastille de la poignee est le seul signal qui reste.
+    var poignee = document.getElementById('wfa-app-poignee');
+    if (poignee) poignee.classList.toggle('wfa-veille', total > 0);
   }
 
   // Charge une PAGE de Support-World : c'est elle qui promeut la session
@@ -331,6 +608,12 @@
       '#wfa-mod .mod-eti.staff { color: #34d399; border-color: rgba(52,211,153,0.35); }',
       '#wfa-mod .mod-eti.gele { color: #fbbf24; border-color: rgba(251,191,36,0.35); }',
       '#wfa-mod .mod-actes { display: flex; gap: 6px; justify-content: flex-end; }',
+      /* Dans la fiche, les gestes de ban tiennent leur propre bande : alignes
+         a GAUCHE (on les lit avant d agir, contrairement aux boutons de fin
+         de ligne du tableau) et separes du casier qui suit. */
+      '#wfa-mod .mod-actes-fiche { justify-content: flex-start; align-items: center;',
+      '  margin: 12px 0 4px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.07); }',
+      '#wfa-mod .mod-etat-ban { flex: 1; font-size: 11px; color: rgba(220,120,120,0.9); }',
       '#wfa-mod .mod-acte { border: 1px solid rgba(255,255,255,0.12); background: transparent;',
       '  color: rgba(255,255,255,0.45); font-family: inherit; font-size: 10px; font-weight: 700;',
       '  letter-spacing: 1px; text-transform: uppercase; padding: 5px 9px; cursor: pointer; }',
@@ -442,6 +725,43 @@
     return /^\d{1,10}$/.test(s) ? s : '';
   }
 
+  // La liste des bans est le SEUL endroit ou trouver l'`id` d'un ban, exige
+  // par /api/fivem/unban. Elle voyage avec deux drapeaux poses par le
+  // serveur : `aMoi` (ce ban est-il le mien) et `leveTousLesBans` (la
+  // permission fivem:unban). C'est le SERVEUR qui tranche l'appartenance —
+  // lui seul connait les anciens pseudos du staff.
+  var MOD_BANS_TTL = 60000;
+
+  function modChargerBans(forcer) {
+    var frais = MOD.bans && (Date.now() - MOD.bansAt) < MOD_BANS_TTL;
+    if (frais && !forcer) return Promise.resolve(MOD.bans);
+    if (MOD.bansEnVol) return MOD.bansEnVol;
+    MOD.bansEnVol = modApiSure('/api/fivem/bans').then(function (d) {
+      MOD.bans = (d && d.bans) || [];
+      MOD.leveTous = Boolean(d && d.leveTousLesBans);
+      MOD.bansAt = Date.now();
+      return MOD.bans;
+    }).catch(function () {
+      // Liste illisible (droit « Gestion FiveM » absent, pont muet) : la
+      // fiche s'affiche sans les boutons de ban plutot que pas du tout.
+      return null;
+    }).then(function (v) { MOD.bansEnVol = null; return v; });
+    return MOD.bansEnVol;
+  }
+
+  // Un ban se rattache a un joueur par son IDUnique ou son ID Discord : les
+  // deux sont presents dans wvc_bans, mais pas toujours renseignes.
+  function modBanDe(idu, discordId) {
+    var liste = MOD.bans || [];
+    for (var i = 0; i < liste.length; i += 1) {
+      var b = liste[i];
+      if (idu && String(b.uid || '') === String(idu)) return b;
+      if (discordId && /^\d{17,20}$/.test(String(discordId))
+        && String(b.discord_id || '') === String(discordId)) return b;
+    }
+    return null;
+  }
+
   function modOuvrirFiche(source, cle) {
     MOD.fiche = { chargement: true, source: source };
     modRendre();
@@ -458,6 +778,22 @@
       var idu = source === 'enligne'
         ? modIdUnique(d && d.info && d.info.uid)
         : modIdUnique(d && d.account && d.account.unique_id);
+      var discordId = source === 'enligne'
+        ? (d && d.info && d.info.discordId)
+        : (d && d.account && d.account.discord_id);
+      MOD.fiche.idu = idu;
+      MOD.fiche.discordId = discordId;
+
+      // Etat de ban : demande a part lui aussi, et sans bloquer. Tant qu'il
+      // n'est pas connu, la fiche n'affiche AUCUN bouton de ban — mieux vaut
+      // rien proposer que proposer « Bannir » a quelqu'un deja banni.
+      modChargerBans().then(function (liste) {
+        if (!liste || !MOD.fiche || MOD.fiche.cle !== cle) return;
+        MOD.fiche.ban = modBanDe(idu, discordId);
+        MOD.fiche.bansLus = true;
+        modRendre();
+      });
+
       if (!idu) return;
       return modApiSure('/api/fivem-sanctions?uid=' + encodeURIComponent(idu)).then(function (s) {
         if (MOD.fiche && MOD.fiche.cle === cle) {
@@ -530,6 +866,8 @@
       }
     }
 
+    html += modActesDeBan(f);
+
     if (f.sanctions === undefined) {
       html += '<div class="mod-vide">Lecture du casier…</div>';
     } else if (!f.sanctions.length) {
@@ -547,6 +885,91 @@
       html += '</tbody></table>';
     }
     return html + '</div>';
+  }
+
+  // Ban DEFINITIF et LEVEE, depuis la fiche (30/08/2026, demande) — les deux
+  // gestes qui manquaient au panneau.
+  //
+  // Le ban definitif ne passe PAS par /api/fivem/ban, qui exige des minutes
+  // superieures a zero : c'est /api/fivem/ban-identity, la seule route qui
+  // sache poser un `expires_at` NULL, et elle vise un COMPTE (IDUnique ou ID
+  // Discord) — donc elle marche aussi sur un joueur hors ligne.
+  //
+  // La levee, elle, se heurte a la seule exception du site : la cle ne suffit
+  // PAS, il faut la permission « fivem:unban » pour lever le ban d'un AUTRE
+  // (decision du 22/08). Le bouton reste donc actif meme sans le droit — le
+  // serveur refuse en expliquant pourquoi, et cette phrase vaut mieux qu'un
+  // bouton grise sans explication.
+  function modActesDeBan(f) {
+    if (!f.bansLus) return '';
+    if (!f.idu && !/^\d{17,20}$/.test(String(f.discordId || ''))) return '';
+
+    var b = f.ban;
+    if (b) {
+      var qui = b.banned_by ? ' (pose par ' + modEchapper(b.banned_by) + ')' : '';
+      var perpetuite = b.expires_at_label ? (' jusqu au ' + modEchapper(b.expires_at_label)) : ' definitivement';
+      return '<div class="mod-actes mod-actes-fiche">' +
+        '<span class="mod-etat-ban">Banni' + perpetuite + qui +
+        (b.aMoi || MOD.leveTous ? '' : ' — ban d un autre staff') + '</span>' +
+        '<button type="button" class="mod-acte" data-ban="lever" data-banid="' + modEchapper(b.id) + '">Lever le ban</button>' +
+        '</div>';
+    }
+    return '<div class="mod-actes mod-actes-fiche">' +
+      '<button type="button" class="mod-acte danger" data-ban="definitif">Ban définitif</button>' +
+      '</div>';
+  }
+
+  // Le compte vise : l'IDUnique s'il est connu, sinon l'ID Discord — ce sont
+  // les deux seules formes acceptees par ban-identity, et elles sont
+  // numeriques toutes les deux (la route rejette le reste en 400).
+  function modCibleDuBan(f) {
+    if (f.idu) return { kind: 'unique', value: String(f.idu) };
+    if (/^\d{17,20}$/.test(String(f.discordId || ''))) return { kind: 'discord', value: String(f.discordId) };
+    return null;
+  }
+
+  function modAgirSurBan(quoi, banId) {
+    var f = MOD.fiche;
+    if (!f || MOD.banEnCours) return;
+    var nom = (f.donnees && f.donnees.info && f.donnees.info.name) || 'ce compte';
+
+    var envoi;
+    if (quoi === 'definitif') {
+      var cible = modCibleDuBan(f);
+      if (!cible) { window.alert('Ni IDUnique ni ID Discord connus : impossible de bannir depuis cette fiche.'); return; }
+      var motif = window.prompt('Motif du ban DEFINITIF de ' + nom + ' :', '');
+      if (motif === null) return;
+      motif = String(motif).trim();
+      if (!motif) { window.alert('Motif vide : rien fait.'); return; }
+      if (!window.confirm('Bannir ' + nom + ' DEFINITIVEMENT (sans date de fin) ?\n\nMotif : ' + motif)) return;
+      // minutes absent = permanent (expires_at NULL cote jeu).
+      envoi = modApiSure('/api/fivem/ban-identity', { kind: cible.kind, value: cible.value, reason: motif });
+    } else {
+      if (!window.confirm('Lever le ban de ' + nom + ' ?')) return;
+      envoi = modApiSure('/api/fivem/unban', { banId: String(banId) });
+    }
+
+    MOD.banEnCours = true;
+    modRendre();
+    envoi.then(function (r) {
+      if (!r || !r.ok) {
+        window.alert('Refuse : ' + ((r && r.error) || 'raison inconnue'));
+        return;
+      }
+      // La liste des bans vient de changer : on la relit AVANT de redessiner,
+      // sinon la fiche montrerait encore l'etat d'avant.
+      return modChargerBans(true).then(function () {
+        if (MOD.fiche) MOD.fiche.ban = modBanDe(MOD.fiche.idu, MOD.fiche.discordId);
+      });
+    }).catch(function (e) {
+      window.alert(e && e.droit
+        ? (e.texte || 'Permission insuffisante pour cette action.')
+        : (e && e.session ? 'Session non reconnue : ouvre « Gestion FiveM » une fois, puis reessaie.'
+          : 'Serveur injoignable : action non effectuee.'));
+    }).then(function () {
+      MOD.banEnCours = false;
+      modRendre();
+    });
   }
 
   var MOD_ETATS = {
@@ -653,7 +1076,7 @@
     }).then(function () {
       modRendre();
       var pied = document.getElementById('mod-pied');
-      if (pied) pied.textContent = 'Rafraichi toutes les 6 s · le ban par cette fenetre est TEMPORAIRE (le permanent reste sur la page Gestion FiveM)';
+      if (pied) pied.textContent = 'Rafraichi toutes les 6 s · le bouton Ban de la liste est TEMPORAIRE (en minutes) ; le ban definitif et la levee sont dans la fiche';
     });
   }
 
@@ -742,7 +1165,7 @@
       modCharger();
       // Rien ne tourne quand le panneau est ferme.
       if (!MOD.minuteur) MOD.minuteur = setInterval(modCharger, MOD_PERIODE);
-      modChargerContexte();
+      modChargerContexte().then(modMarquerVu);
       if (!MOD.minuteurContexte) MOD.minuteurContexte = setInterval(modChargerContexte, 30000);
       if (surRecherche) {
         var r = document.getElementById('mod-rech');
@@ -764,6 +1187,10 @@
       if (!b || b.disabled) return;
       if (b.getAttribute('data-fiche')) {
         modOuvrirFiche(b.getAttribute('data-fiche'), b.getAttribute('data-cle'));
+        return;
+      }
+      if (b.getAttribute('data-ban')) {
+        modAgirSurBan(b.getAttribute('data-ban'), b.getAttribute('data-banid'));
         return;
       }
       if (b.getAttribute('data-acte')) modAgir(b.getAttribute('data-acte'), b.getAttribute('data-id'));
@@ -789,7 +1216,7 @@
     poserBarreTitre();
     if (!SUR_WORLDFA) return;
 
-    if (!CHEMINS_ADMIN.test(location.pathname)) {
+    if (!CHEMINS_ADMIN.test(cheminCourant())) {
       var voile = document.createElement('style');
       voile.textContent = '.topbar { display: none !important; }';
       document.head.appendChild(voile);
@@ -915,7 +1342,15 @@
          bouton, et le repli est memorise. Sans ce point, rien ne signalait
          plus jamais qu'une version attend. */
       '#wfa-app-poignee.wfa-maj::after { content: ""; position: absolute; top: -1px; right: -1px;',
-      '  width: 7px; height: 7px; border-radius: 50%; background: rgba(52,211,153,0.95); }'
+      '  width: 7px; height: 7px; border-radius: 50%; background: rgba(52,211,153,0.95); }',
+      /* Veille : ce qui est arrive pendant qu on regardait ailleurs. Rouge,
+         a distinguer du vert de la mise a jour — deux signaux au meme endroit
+         quand la barre est repliee. */
+      '#wfa-app-bar nav a.wfa-mod-ouvrir .wfa-mod-compte { display: none; min-width: 16px; padding: 1px 5px;',
+      '  margin-left: auto; margin-right: 8px; text-align: center; font-size: 9px; font-weight: 700;',
+      '  color: #fff; background: rgba(200,60,60,0.95); }',
+      '#wfa-app-poignee.wfa-veille::before { content: ""; position: absolute; bottom: -1px; right: -1px;',
+      '  width: 7px; height: 7px; border-radius: 50%; background: rgba(220,80,80,0.95); }'
     ].join('\n');
     document.head.appendChild(style);
 
@@ -939,7 +1374,7 @@
     var accesMod = document.createElement('a');
     accesMod.className = 'wfa-mod-ouvrir';
     accesMod.href = '#';
-    accesMod.innerHTML = 'Moderation <span>Ctrl+K</span>';
+    accesMod.innerHTML = 'Moderation <span class="wfa-mod-compte"></span><span>Ctrl+K</span>';
     accesMod.addEventListener('click', function (e) { e.preventDefault(); modBasculer(true, true); });
     nav.appendChild(accesMod);
 
@@ -1064,6 +1499,15 @@
     });
     verifierMaj();
     setInterval(verifierMaj, 10 * 60 * 1000);
+
+    // VEILLE panneau FERME : deux requetes toutes les 90 s, pour que la barre
+    // sache dire « il est arrive quelque chose ». Le premier releve est
+    // differe de 1,5 s — le temps que la page finisse de charger ses propres
+    // ressources, sans faire attendre la pastille une navigation entiere.
+    setTimeout(function () { modChargerContexte(); }, 1500);
+    setInterval(function () {
+      if (!MOD.ouvert) modChargerContexte();
+    }, MOD_VEILLE_PERIODE);
 
     // Les liens target=_blank (« ouvrir le message » vers Discord, logs...)
     // n'ont pas de navigateur sous la main ici : meme origine -> on navigue
